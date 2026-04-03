@@ -1,26 +1,37 @@
 "use client";
 
 import { useState } from "react";
-import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-export default function LoginPage() {
-  const router = useRouter();
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const handleReset = async () => {
     setError("");
+    setMessage("");
+
+    if (!email) {
+      setError("請輸入電子郵件。");
+      return;
+    }
+
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      router.push("/dashboard");
+      await sendPasswordResetEmail(auth, email);
+      setMessage("重設密碼郵件已寄出，請檢查您的信箱。");
     } catch (err) {
-      setError("帳號或密碼錯誤，請重新確認。");
+      if (err.code === "auth/user-not-found") {
+        setError("此電子郵件尚未註冊。");
+      } else if (err.code === "auth/invalid-email") {
+        setError("電子郵件格式不正確。");
+      } else {
+        setError("發送失敗，請稍後再試。");
+      }
     } finally {
       setLoading(false);
     }
@@ -30,10 +41,10 @@ export default function LoginPage() {
     <div className="min-h-screen bg-black flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-zinc-900 rounded-2xl p-8 shadow-xl">
         <h1 className="text-2xl font-bold text-white text-center mb-2">
-          股票儀表板
+          忘記密碼
         </h1>
         <p className="text-zinc-400 text-center text-sm mb-8">
-          請登入您的帳號
+          輸入您的電子郵件，我們將寄送重設連結
         </p>
 
         <div className="flex flex-col gap-4">
@@ -48,39 +59,29 @@ export default function LoginPage() {
             />
           </div>
 
-          <div>
-            <label className="text-zinc-400 text-sm mb-1 block">密碼</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="請輸入密碼"
-              className="w-full bg-zinc-800 text-white rounded-lg px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
           {error && (
             <p className="text-red-400 text-sm text-center">{error}</p>
           )}
 
+          {message && (
+            <p className="text-green-400 text-sm text-center">{message}</p>
+          )}
+
           <button
-            onClick={handleLogin}
+            onClick={handleReset}
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white font-semibold rounded-lg py-3 text-sm transition-colors"
           >
-            {loading ? "登入中..." : "登入"}
+            {loading ? "寄送中..." : "寄送重設郵件"}
           </button>
 
-          <div className="flex justify-between text-sm">
-            <Link href="/forgot-password" className="text-zinc-400 hover:text-white transition-colors">
-              忘記密碼？
-            </Link>
-            <Link href="/register" className="text-zinc-400 hover:text-white transition-colors">
-              還沒有帳號？註冊
+          <div className="text-center text-sm">
+            <Link href="/" className="text-zinc-400 hover:text-white transition-colors">
+              返回登入
             </Link>
           </div>
         </div>
       </div>
     </div>
   );
-}
+} 
