@@ -11,7 +11,7 @@ export default function PieChart({ holdings }) {
     );
   }
 
-  const data = holdings.map((h) => ({
+  const data = holdings.filter((h) => h.shares > 0).map((h) => ({
     name: `${h.code} ${h.name}`,
     value: Number(((h.current_price || h.avg_cost) * h.shares).toFixed(0)),
   }));

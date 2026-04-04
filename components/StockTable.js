@@ -1,11 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import EditStockModal from "@/components/EditStockModal";
+import StockDetailModal from "@/components/StockDetailModal";
 
-export default function StockTable({ holdings, onEdit, onDelete }) {
-  const [editingHolding, setEditingHolding] = useState(null);
-  const [deletingId, setDeletingId] = useState(null);
+export default function StockTable({
+  holdings,
+  transactions,
+  onEdit,
+  onDelete,
+  onDeleteTransaction,
+  onDeleteQuickHolding,
+  onEditTransaction,
+  onEditQuickHolding,
+}) {
+  const [detailHolding, setDetailHolding] = useState(null);
 
   const formatMoney = (num) =>
     Number(num).toLocaleString("zh-TW", { minimumFractionDigits: 0 });
@@ -18,21 +26,13 @@ export default function StockTable({ holdings, onEdit, onDelete }) {
     return `${lots} 張 ${odd} 股`;
   };
 
-  const handleDeleteConfirm = async (id) => {
-    try {
-      await onDelete(id);
-    } catch (err) {
-      console.error("刪除失敗：", err);
-    } finally {
-      setDeletingId(null);
-    }
-  };
+  const visibleHoldings = holdings.filter((h) => h.shares > 0);
 
-  if (holdings.length === 0) {
+  if (visibleHoldings.length === 0) {
     return (
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-8 text-center">
         <p className="text-zinc-500 text-sm">
-          尚無持股，點擊右下角「＋ 新增持股」開始
+          尚無持股，點擊「＋ 快速建倉」或「＋ 新增交易」開始
         </p>
       </div>
     );
@@ -51,11 +51,10 @@ export default function StockTable({ holdings, onEdit, onDelete }) {
               <th className="text-zinc-400 font-medium text-right px-5 py-3">市值</th>
               <th className="text-zinc-400 font-medium text-right px-5 py-3">損益</th>
               <th className="text-zinc-400 font-medium text-right px-5 py-3">損益%</th>
-              <th className="text-zinc-400 font-medium text-center px-5 py-3">操作</th>
             </tr>
           </thead>
           <tbody>
-            {holdings.map((h) => {
+            {visibleHoldings.map((h) => {
               const currentPrice = h.current_price || h.avg_cost;
               const marketValue = currentPrice * h.shares;
               const cost = h.avg_cost * h.shares;
@@ -66,7 +65,8 @@ export default function StockTable({ holdings, onEdit, onDelete }) {
               return (
                 <tr
                   key={h.id}
-                  className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors"
+                  onClick={() => setDetailHolding(h)}
+                  className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   <td className="px-5 py-3">
                     <p className="text-white font-medium">{h.code}</p>
@@ -90,22 +90,6 @@ export default function StockTable({ holdings, onEdit, onDelete }) {
                   <td className={`px-5 py-3 text-right font-medium ${isPositive ? "text-green-400" : "text-red-400"}`}>
                     {isPositive ? "+" : ""}{pnlPercent.toFixed(2)}%
                   </td>
-                  <td className="px-5 py-3 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => setEditingHolding(h)}
-                        className="text-zinc-400 hover:text-blue-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-blue-500"
-                      >
-                        編輯
-                      </button>
-                      <button
-                        onClick={() => setDeletingId(h.id)}
-                        className="text-zinc-400 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-500"
-                      >
-                        刪除
-                      </button>
-                    </div>
-                  </td>
                 </tr>
               );
             })}
@@ -113,39 +97,18 @@ export default function StockTable({ holdings, onEdit, onDelete }) {
         </table>
       </div>
 
-      {/* 編輯彈窗 */}
-      {editingHolding && (
-        <EditStockModal
-          holding={editingHolding}
-          onClose={() => setEditingHolding(null)}
-          onSave={onEdit}
+      {detailHolding && (
+        <StockDetailModal
+          holding={detailHolding}
+          transactions={transactions}
+          onClose={() => setDetailHolding(null)}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onDeleteTransaction={onDeleteTransaction}
+          onDeleteQuickHolding={onDeleteQuickHolding}
+          onEditTransaction={onEditTransaction}
+          onEditQuickHolding={onEditQuickHolding}
         />
-      )}
-
-      {/* 刪除確認彈窗 */}
-      {deletingId && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
-          <div className="w-full max-w-sm bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
-            <h2 className="text-white font-bold text-lg mb-2">確認刪除</h2>
-            <p className="text-zinc-400 text-sm mb-6">
-              確定要刪除這筆持股嗎？此操作無法復原。
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeletingId(null)}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => handleDeleteConfirm(deletingId)}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm py-2.5 rounded-lg transition-colors font-medium"
-              >
-                確認刪除
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </>
   );

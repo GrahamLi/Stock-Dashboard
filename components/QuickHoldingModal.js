@@ -133,15 +133,12 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
   );
 }
 
-export default function AddStockModal({ onClose, onAdd }) {
-  const [txForm, setTxForm] = useState({
+export default function QuickHoldingModal({ onClose, onAdd }) {
+  const [form, setForm] = useState({
     code: "",
     name: "",
-    action: "買入",
     shares: "",
-    price: "",
-    date: new Date().toISOString().split("T")[0],
-    note: "",
+    avg_cost: "",
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -151,34 +148,27 @@ export default function AddStockModal({ onClose, onAdd }) {
 
   const handleSubmit = async () => {
     setError("");
-    if (!txForm.code || !txForm.name) {
+    if (!form.code || !form.name) {
       setError("請從下拉選單選取股票，或輸入完整代號/名稱。");
       return;
     }
-    if (!txForm.shares || isNaN(txForm.shares) || Number(txForm.shares) <= 0) {
-      setError("股數請輸入正確數字。");
+    if (!form.shares || isNaN(form.shares) || Number(form.shares) <= 0) {
+      setError("持有股數請輸入正確數字。");
       return;
     }
-    if (!txForm.price || isNaN(txForm.price) || Number(txForm.price) <= 0) {
-      setError("成交價請輸入正確數字。");
-      return;
-    }
-    if (!txForm.date) {
-      setError("請選擇交易日期。");
+    if (!form.avg_cost || isNaN(form.avg_cost) || Number(form.avg_cost) <= 0) {
+      setError("平均成本請輸入正確數字。");
       return;
     }
     setLoading(true);
     try {
       await onAdd({
-        type: "transaction",
-        code: txForm.code.trim(),
-        name: txForm.name.trim(),
-        action: txForm.action,
-        shares: Number(txForm.shares),
-        price: Number(txForm.price),
-        date: txForm.date,
-        note: txForm.note.trim(),
-        has_transaction_history: true,
+        type: "quick",
+        code: form.code.trim(),
+        name: form.name.trim(),
+        shares: Number(form.shares),
+        avg_cost: Number(form.avg_cost),
+        has_transaction_history: false,
       });
       onClose();
     } catch (err) {
@@ -193,9 +183,9 @@ export default function AddStockModal({ onClose, onAdd }) {
       <div className="w-full max-w-md bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-white font-bold text-lg">新增交易紀錄</h2>
+            <h2 className="text-white font-bold text-lg">快速建倉</h2>
             <p className="text-zinc-500 text-xs mt-0.5">
-              記錄每一筆實際買賣交易
+              適合輸入現有持股，不知道每筆交易明細
             </p>
           </div>
           <button
@@ -210,67 +200,37 @@ export default function AddStockModal({ onClose, onAdd }) {
           <div>
             <label className="text-zinc-400 text-xs mb-1 block">搜尋股票 *</label>
             <StockSearchInput
-              codeValue={txForm.code}
-              nameValue={txForm.name}
+              codeValue={form.code}
+              nameValue={form.name}
               onSelect={(code, name) =>
-                setTxForm((prev) => ({ ...prev, code, name }))
+                setForm((prev) => ({ ...prev, code, name }))
               }
             />
-            {txForm.code && txForm.name && (
+            {form.code && form.name && (
               <p className="text-zinc-500 text-xs mt-1">
-                已選取：{txForm.code} {txForm.name}
+                已選取：{form.code} {form.name}
               </p>
             )}
           </div>
           <div>
-            <label className="text-zinc-400 text-xs mb-1 block">買賣方向 *</label>
-            <select
-              value={txForm.action}
-              onChange={(e) => setTxForm({ ...txForm, action: e.target.value })}
-              className={inputClass}
-            >
-              <option value="買入">買入</option>
-              <option value="賣出">賣出</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-zinc-400 text-xs mb-1 block">股數 *</label>
+            <label className="text-zinc-400 text-xs mb-1 block">持有股數 *</label>
             <input
               type="number"
-              value={txForm.shares}
-              onChange={(e) => setTxForm({ ...txForm, shares: e.target.value })}
-              placeholder="例：1000"
+              value={form.shares}
+              onChange={(e) => setForm({ ...form, shares: e.target.value })}
+              placeholder="例：1000（1張）"
               className={inputClass}
             />
           </div>
           <div>
             <label className="text-zinc-400 text-xs mb-1 block">
-              成交價（元/股）*
+              平均成本（元/股）*
             </label>
             <input
               type="number"
-              value={txForm.price}
-              onChange={(e) => setTxForm({ ...txForm, price: e.target.value })}
+              value={form.avg_cost}
+              onChange={(e) => setForm({ ...form, avg_cost: e.target.value })}
               placeholder="例：580"
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="text-zinc-400 text-xs mb-1 block">交易日期 *</label>
-            <input
-              type="date"
-              value={txForm.date}
-              onChange={(e) => setTxForm({ ...txForm, date: e.target.value })}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="text-zinc-400 text-xs mb-1 block">備註（選填）</label>
-            <input
-              type="text"
-              value={txForm.note}
-              onChange={(e) => setTxForm({ ...txForm, note: e.target.value })}
-              placeholder="選填"
               className={inputClass}
             />
           </div>
