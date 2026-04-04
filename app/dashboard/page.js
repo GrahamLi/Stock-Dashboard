@@ -11,6 +11,7 @@ import {
   where,
   doc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import AuthGuard from "@/components/AuthGuard";
@@ -20,11 +21,13 @@ import PieChart from "@/components/PieChart";
 import LineChart from "@/components/LineChart";
 import StockTable from "@/components/StockTable";
 import AddStockModal from "@/components/AddStockModal";
+import DailyChanges from "@/components/DailyChanges";
 
 export default function DashboardPage() {
   const [user, setUser] = useState(null);
   const [holdings, setHoldings] = useState([]);
   const [history, setHistory] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -37,10 +40,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (user) {
-      fetchHoldings();
-      fetchHistory();
+      fetchAll();
     }
   }, [user]);
+
+  const fetchAll = async () => {
+    await Promise.all([
+      fetchHoldings(),
+      fetchHistory(),
+      fetchTransactions(),
+    ]);
+    setLoading(false);
+  };
 
   const fetchHoldings = async () => {
     try {
@@ -56,8 +67,6 @@ export default function DashboardPage() {
       setHoldings(data);
     } catch (err) {
       console.error("讀取持股失敗：", err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -77,26 +86,38 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchTransactions = async () => {
+    try {
+      const q = query(
+        collection(db, "transactions"),
+        where("user_id", "==", user.uid)
+      );
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setTransactions(data);
+    } catch (err) {
+      console.error("讀取交易紀錄失敗：", err);
+    }
+  };
+
   const handleAddStock = async (formData) => {
     if (formData.type === "quick") {
-      // 檢查是否已有此股票
       const existing = holdings.find((h) => h.code === formData.code);
-
       if (existing) {
-        // 已有此股票 → 加權平均更新
         const newShares = existing.shares + formData.shares;
         const newAvgCost =
           (existing.shares * existing.avg_cost +
             formData.shares * formData.avg_cost) /
           newShares;
-
         const ref = doc(db, "holdings", existing.id);
         await updateDoc(ref, {
           shares: newShares,
           avg_cost: Number(newAvgCost.toFixed(4)),
         });
       } else {
-        // 新股票 → 新增
         await addDoc(collection(db, "holdings"), {
           user_id: user.uid,
           code: formData.code,
@@ -109,7 +130,6 @@ export default function DashboardPage() {
         });
       }
     } else {
-      // 交易紀錄模式
       await addDoc(collection(db, "transactions"), {
         user_id: user.uid,
         code: formData.code,
@@ -122,9 +142,7 @@ export default function DashboardPage() {
         created_at: serverTimestamp(),
       });
 
-      // 更新 holdings
       const existing = holdings.find((h) => h.code === formData.code);
-
       if (formData.action === "買入") {
         if (existing) {
           const newShares = existing.shares + formData.shares;
@@ -153,15 +171,36 @@ export default function DashboardPage() {
       } else if (formData.action === "賣出" && existing) {
         const newShares = existing.shares - formData.shares;
         const ref = doc(db, "holdings", existing.id);
-        if (newShares <= 0) {
-          await updateDoc(ref, { shares: 0 });
-        } else {
-          await updateDoc(ref, { shares: newShares });
-        }
+        await updateDoc(ref, { shares: newShares <= 0 ? 0 : newShares });
       }
     }
+    await fetchAll();
+  };
 
-    await fetchHoldings();
+  const handleEditStock = async (id, updatedData) => {
+    try {
+      const ref = doc(db, "holdings", id);
+      await updateDoc(ref, {
+        code: updatedData.code,
+        name: updatedData.name,
+        shares: updatedData.shares,
+        avg_cost: updatedData.avg_cost,
+      });
+      await fetchHoldings();
+    } catch (err) {
+      console.error("編輯持股失敗：", err);
+      throw err;
+    }
+  };
+
+  const handleDeleteStock = async (id) => {
+    try {
+      await deleteDoc(doc(db, "holdings", id));
+      await fetchHoldings();
+    } catch (err) {
+      console.error("刪除持股失敗：", err);
+      throw err;
+    }
   };
 
   return (
@@ -182,14 +221,25 @@ export default function DashboardPage() {
               <LineChart history={history} />
             </div>
 
-            <div className="px-6 pb-6">
+            <div className="px-6 pb-4">
               <p className="text-zinc-400 text-sm mb-3">持股清單</p>
-              <StockTable holdings={holdings} />
+              <StockTable
+                holdings={holdings}
+                onEdit={handleEditStock}
+                onDelete={handleDeleteStock}
+              />
+            </div>
+
+            <div className="px-6 pb-24">
+              <DailyChanges
+                transactions={transactions}
+                history={history}
+                holdings={holdings}
+              />
             </div>
           </>
         )}
 
-        {/* 新增持股浮動按鈕 */}
         <button
           onClick={() => setShowModal(true)}
           className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-3 rounded-full shadow-lg transition-colors z-40"
