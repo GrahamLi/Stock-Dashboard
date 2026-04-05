@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-// 全形轉半形
 function toHalfWidth(str) {
   return str
     .replace(/[\uff01-\uff5e]/g, (ch) =>
@@ -112,7 +111,6 @@ export default function StockDetailModal({
 
   const handleSaveTx = async () => {
     setEditError("");
-
     const normalizedShares = toHalfWidth(String(txEditForm.shares));
     const normalizedPrice = toHalfWidth(String(txEditForm.price));
 
@@ -133,7 +131,6 @@ export default function StockDetailModal({
       setEditError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05");
       return;
     }
-
     setEditLoading(true);
     try {
       await onEditTransaction(editingTx.id, holding.code, {
@@ -154,7 +151,6 @@ export default function StockDetailModal({
 
   const handleSaveQuick = async () => {
     setEditError("");
-
     const normalizedShares = toHalfWidth(String(quickEditForm.shares));
     const normalizedCost = toHalfWidth(String(quickEditForm.avg_cost));
 
@@ -166,7 +162,6 @@ export default function StockDetailModal({
       setEditError("平均成本請輸入正確數字。");
       return;
     }
-
     setEditLoading(true);
     try {
       await onEditQuickHolding(holding.id, {
@@ -188,7 +183,7 @@ export default function StockDetailModal({
   return (
     <>
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
-        <div className="w-full max-w-lg bg-zinc-900 rounded-2xl shadow-xl border border-zinc-800 flex flex-col max-h-[85vh]">
+        <div className="w-full max-w-2xl bg-zinc-900 rounded-2xl shadow-xl border border-zinc-800 flex flex-col max-h-[85vh]">
 
           {/* Header */}
           <div className="p-6 border-b border-zinc-800 shrink-0">
@@ -240,6 +235,7 @@ export default function StockDetailModal({
                     <th className="text-zinc-400 font-medium text-right px-5 py-3">股數</th>
                     <th className="text-zinc-400 font-medium text-right px-5 py-3">價格</th>
                     <th className="text-zinc-400 font-medium text-right px-5 py-3">總金額</th>
+                    <th className="text-zinc-400 font-medium text-left px-5 py-3">備註</th>
                     <th className="text-zinc-400 font-medium text-center px-5 py-3">操作</th>
                   </tr>
                 </thead>
@@ -267,6 +263,9 @@ export default function StockDetailModal({
                       </td>
                       <td className="px-5 py-3 text-right text-zinc-300">
                         ${formatMoney(tx.shares * tx.price)}
+                      </td>
+                      <td className="px-5 py-3 text-zinc-400 text-xs">
+                        {tx.note || "-"}
                       </td>
                       <td className="px-5 py-3 text-center">
                         <div className="flex items-center justify-center gap-1">
@@ -304,6 +303,9 @@ export default function StockDetailModal({
                       </td>
                       <td className="px-5 py-3 text-right text-zinc-400">
                         ${formatMoney((holding.initial_shares || holding.shares) * holding.avg_cost)}
+                      </td>
+                      <td className="px-5 py-3 text-zinc-500 text-xs">
+                        快速建倉
                       </td>
                       <td className="px-5 py-3 text-center">
                         <div className="flex items-center justify-center gap-1">
