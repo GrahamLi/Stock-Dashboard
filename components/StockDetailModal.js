@@ -299,10 +299,10 @@ export default function StockDetailModal({
                         {formatShares(holding.initial_shares || holding.shares)}
                       </td>
                       <td className="px-5 py-3 text-right text-zinc-400">
-                        ${formatMoney(holding.avg_cost)}
+                        ${formatMoney(holding.t0_avg_cost || holding.avg_cost)}
                       </td>
                       <td className="px-5 py-3 text-right text-zinc-400">
-                        ${formatMoney((holding.initial_shares || holding.shares) * holding.avg_cost)}
+                        ${formatMoney((holding.initial_shares || holding.shares) * (holding.t0_avg_cost || holding.avg_cost))}
                       </td>
                       <td className="px-5 py-3 text-zinc-500 text-xs">
                         快速建倉

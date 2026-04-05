@@ -14,6 +14,12 @@ export default function DailyChanges({
   const [pnlEndDate, setPnlEndDate] = useState("");
   const [pnlResult, setPnlResult] = useState(null);
 
+  // 交易紀錄篩選
+  const [filterStart, setFilterStart] = useState("");
+  const [filterEnd, setFilterEnd] = useState("");
+  const [appliedStart, setAppliedStart] = useState("");
+  const [appliedEnd, setAppliedEnd] = useState("");
+
   const today = new Date().toISOString().split("T")[0];
   const todayPnl = calcRealizedPnl(holdings, transactions, today, today);
   const todayTotalPnl = todayPnl.reduce((sum, r) => sum + r.realizedPnl, 0);
@@ -35,13 +41,36 @@ export default function DailyChanges({
     setPnlResult(result);
   };
 
+  const handleFilterApply = () => {
+    setAppliedStart(filterStart);
+    setAppliedEnd(filterEnd);
+  };
+
+  const handleFilterClear = () => {
+    setFilterStart("");
+    setFilterEnd("");
+    setAppliedStart("");
+    setAppliedEnd("");
+  };
+
+  // 篩選交易紀錄
+  const filteredTransactions = transactions.filter((tx) => {
+    if (appliedStart && tx.date < appliedStart) return false;
+    if (appliedEnd && tx.date > appliedEnd) return false;
+    return true;
+  });
+
+  const sortedTransactions = filteredTransactions
+    .slice()
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
   return (
     <>
       <div className="bg-zinc-900 rounded-xl border border-zinc-800">
         {/* Tab 列 */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <p className="text-zinc-400 text-sm">每日庫存變動</p>
+            <p className="text-zinc-400 text-sm">庫存變動歷史紀錄</p>
             {todayPnl.length > 0 && (
               <span className={`text-xs font-medium px-2 py-1 rounded-full ${
                 todayTotalPnl >= 0
@@ -102,9 +131,53 @@ export default function DailyChanges({
         {/* 交易紀錄 Tab */}
         {tab === "transactions" && (
           <>
-            {transactions.length === 0 ? (
+            {/* 日期篩選器 */}
+            <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-800 flex-wrap">
+              <span className="text-zinc-500 text-xs shrink-0">篩選日期：</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="date"
+                  value={filterStart}
+                  onChange={(e) => setFilterStart(e.target.value)}
+                  className="bg-zinc-800 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-zinc-500 text-xs">～</span>
+                <input
+                  type="date"
+                  value={filterEnd}
+                  onChange={(e) => setFilterEnd(e.target.value)}
+                  className="bg-zinc-800 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleFilterApply}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  查詢
+                </button>
+                <button
+                  onClick={handleFilterClear}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  清除
+                </button>
+                {(appliedStart || appliedEnd) && (
+                  <span className="text-zinc-500 text-xs">
+                    顯示 {appliedStart || "最早"} ～ {appliedEnd || "最新"}，共 {sortedTransactions.length} 筆
+                  </span>
+                )}
+                {!appliedStart && !appliedEnd && (
+                  <span className="text-zinc-500 text-xs">
+                    全部，共 {sortedTransactions.length} 筆
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {sortedTransactions.length === 0 ? (
               <div className="p-8 text-center">
-                <p className="text-zinc-500 text-sm">尚無交易紀錄</p>
+                <p className="text-zinc-500 text-sm">
+                  {appliedStart || appliedEnd ? "此區間無交易紀錄" : "尚無交易紀錄"}
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -121,42 +194,39 @@ export default function DailyChanges({
                     </tr>
                   </thead>
                   <tbody>
-                    {transactions
-                      .slice()
-                      .sort((a, b) => new Date(b.date) - new Date(a.date))
-                      .map((tx) => (
-                        <tr
-                          key={tx.id}
-                          className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors"
-                        >
-                          <td className="px-5 py-3 text-zinc-300">{tx.date}</td>
-                          <td className="px-5 py-3">
-                            <p className="text-white font-medium">{tx.code}</p>
-                            <p className="text-zinc-400 text-xs">{tx.name}</p>
-                          </td>
-                          <td className="px-5 py-3 text-center">
-                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                              tx.action === "買入"
-                                ? "bg-green-400/10 text-green-400"
-                                : "bg-red-400/10 text-red-400"
-                            }`}>
-                              {tx.action}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 text-right text-zinc-300">
-                            {formatShares(tx.shares)}
-                          </td>
-                          <td className="px-5 py-3 text-right text-zinc-300">
-                            ${formatMoney(tx.price)}
-                          </td>
-                          <td className="px-5 py-3 text-right text-zinc-300">
-                            ${formatMoney(tx.shares * tx.price)}
-                          </td>
-                          <td className="px-5 py-3 text-zinc-400 text-xs">
-                            {tx.note || "-"}
-                          </td>
-                        </tr>
-                      ))}
+                    {sortedTransactions.map((tx) => (
+                      <tr
+                        key={tx.id}
+                        className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors"
+                      >
+                        <td className="px-5 py-3 text-zinc-300">{tx.date}</td>
+                        <td className="px-5 py-3">
+                          <p className="text-white font-medium">{tx.code}</p>
+                          <p className="text-zinc-400 text-xs">{tx.name}</p>
+                        </td>
+                        <td className="px-5 py-3 text-center">
+                          <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                            tx.action === "買入"
+                              ? "bg-green-400/10 text-green-400"
+                              : "bg-red-400/10 text-red-400"
+                          }`}>
+                            {tx.action}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-right text-zinc-300">
+                          {formatShares(tx.shares)}
+                        </td>
+                        <td className="px-5 py-3 text-right text-zinc-300">
+                          ${formatMoney(tx.price)}
+                        </td>
+                        <td className="px-5 py-3 text-right text-zinc-300">
+                          ${formatMoney(tx.shares * tx.price)}
+                        </td>
+                        <td className="px-5 py-3 text-zinc-400 text-xs">
+                          {tx.note || "-"}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
