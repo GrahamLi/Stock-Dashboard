@@ -131,19 +131,44 @@ export default function DashboardPage() {
 
   const handleDeleteQuickHolding = async (holdingId) => {
     try {
-      const { doc, updateDoc } = await import("firebase/firestore");
+      const { doc, updateDoc, getDoc } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase");
-      await updateDoc(doc(db, "holdings", holdingId), {
-        has_quick_holding: false,
-        initial_shares: 0,
-      });
+
+      // 檢查有沒有交易紀錄
+      const holdingSnap = await getDoc(doc(db, "holdings", holdingId));
+      const holdingData = holdingSnap.data();
+      const code = holdingData?.code;
+
+      // 查該股的交易紀錄
+      const { collection, query, where, getDocs } = await import("firebase/firestore");
+      const q = query(
+        collection(db, "transactions"),
+        where("user_id", "==", user.uid),
+        where("code", "==", code)
+      );
+      const txSnap = await getDocs(q);
+
+      if (txSnap.empty) {
+        // 沒有交易紀錄 → shares 也歸零
+        await updateDoc(doc(db, "holdings", holdingId), {
+          has_quick_holding: false,
+          initial_shares: 0,
+          shares: 0,
+        });
+      } else {
+        // 有交易紀錄 → 只移除建倉，shares 保留
+        await updateDoc(doc(db, "holdings", holdingId), {
+          has_quick_holding: false,
+          initial_shares: 0,
+        });
+      }
       await fetchAll();
     } catch (err) {
       console.error("刪除建倉失敗：", err);
       throw err;
     }
   };
-
+  
   const formatLastUpdated = (date) => {
     if (!date) return "";
     return date.toLocaleString("zh-TW", {
@@ -170,7 +195,7 @@ export default function DashboardPage() {
               <p className="text-zinc-500 text-xs">
                 {lastUpdated && `資料讀取時間：${formatLastUpdated(lastUpdated)}`}
               </p>
-              <UpdateButton />
+              <UpdateButton onRefresh={fetchAll} />
             </div>
 
             <SummaryCards holdings={holdings} />

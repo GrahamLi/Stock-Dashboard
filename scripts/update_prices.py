@@ -1,12 +1,10 @@
 # =============================================================================
-# update_prices.py - V01
+# update_prices.py
 # =============================================================================
 # Revision Change List:
-# V01 - 初始版本
-#     - 從 Firestore 讀取所有持股代號
-#     - 用 yfinance 抓取台股收盤價
-#     - 更新 Firestore holdings 的 current_price
-#     - 新增一筆 history 記錄（總市值快照）
+# V01 - 初始版本，抓取台股收盤價並更新 Firestore
+# V02 - 修正 history 重複寫入問題
+#       同一天已有紀錄時改為更新，不重複新增
 # =============================================================================
 
 import yfinance as yf
@@ -16,16 +14,23 @@ from datetime import date
 import os
 import json
 
+
 def initialize_firebase():
     """初始化 Firebase Admin SDK"""
     try:
-        service_account_info = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
-        cred = credentials.Certificate(service_account_info)
+        if "FIREBASE_SERVICE_ACCOUNT" in os.environ:
+            service_account_info = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+            cred = credentials.Certificate(service_account_info)
+        else:
+            # 本機開發：直接讀取 JSON 檔案
+            json_path = os.path.join(os.path.dirname(__file__), "serviceAccount.json")
+            cred = credentials.Certificate(json_path)
         firebase_admin.initialize_app(cred)
         print("Firebase 初始化成功")
     except Exception as e:
         print(f"Firebase 初始化失敗：{e}")
         raise
+
 
 def get_taiwan_stock_price(code):
     """用 yfinance 抓台股現價，代號格式為 2330.TW"""
@@ -33,7 +38,7 @@ def get_taiwan_stock_price(code):
         ticker = yf.Ticker(f"{code}.TW")
         hist = ticker.history(period="1d")
         if hist.empty:
-            print(f"[警告] {code} 無法取得股價，嘗試 .TWO")
+            print(f"[警告] {code} 無法取得股價（.TW），嘗試 .TWO")
             ticker = yf.Ticker(f"{code}.TWO")
             hist = ticker.history(period="1d")
         if hist.empty:
@@ -45,6 +50,7 @@ def get_taiwan_stock_price(code):
     except Exception as e:
         print(f"[錯誤] 抓取 {code} 股價失敗：{e}")
         return None
+
 
 def update_prices():
     """主流程：更新所有持股現價並記錄歷史"""
@@ -62,6 +68,10 @@ def update_prices():
     except Exception as e:
         print(f"[錯誤] 讀取持股失敗：{e}")
         raise
+
+    if not holdings_list:
+        print("沒有持股資料，結束執行。")
+        return
 
     # 抓每個代號的股價（同代號只抓一次）
     price_cache = {}
@@ -94,27 +104,50 @@ def update_prices():
         avg_cost = holding.get("avg_cost", 0)
         price = price_cache.get(code) or avg_cost
 
+        # 只計算持股數 > 0 的
+        if shares <= 0:
+            continue
+
         if uid not in user_totals:
             user_totals[uid] = {"total_value": 0, "total_cost": 0}
 
         user_totals[uid]["total_value"] += price * shares
         user_totals[uid]["total_cost"] += avg_cost * shares
 
-    # 寫入 history
+    # 寫入 history（同一天已有紀錄則更新，不重複新增）
     history_ref = db.collection("history")
     for uid, totals in user_totals.items():
         try:
-            history_ref.add({
-                "user_id": uid,
-                "date": today,
-                "total_value": round(totals["total_value"], 2),
-                "total_cost": round(totals["total_cost"], 2),
-            })
-            print(f"寫入 history：user={uid}, date={today}, total_value={totals['total_value']:.2f}")
+            # 查詢今天是否已有紀錄
+            existing = (
+                history_ref
+                .where("user_id", "==", uid)
+                .where("date", "==", today)
+                .get()
+            )
+
+            if existing:
+                # 更新現有紀錄
+                existing[0].reference.update({
+                    "total_value": round(totals["total_value"], 2),
+                    "total_cost": round(totals["total_cost"], 2),
+                })
+                print(f"更新 history：user={uid}, date={today}, total_value={totals['total_value']:.2f}")
+            else:
+                # 新增紀錄
+                history_ref.add({
+                    "user_id": uid,
+                    "date": today,
+                    "total_value": round(totals["total_value"], 2),
+                    "total_cost": round(totals["total_cost"], 2),
+                })
+                print(f"新增 history：user={uid}, date={today}, total_value={totals['total_value']:.2f}")
+
         except Exception as e:
             print(f"[錯誤] 寫入 history 失敗：{e}")
 
     print("全部更新完成！")
+
 
 if __name__ == "__main__":
     initialize_firebase()

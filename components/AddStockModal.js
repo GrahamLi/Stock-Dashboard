@@ -3,12 +3,24 @@
 import { useState, useRef, useEffect } from "react";
 import STOCK_LIST from "@/lib/stockList";
 
+// 全形轉半形
+function toHalfWidth(str) {
+  return str
+    .replace(/[\uff01-\uff5e]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) - 0xfee0)
+    )
+    .replace(/\u3000/g, " ");
+}
+
 function searchStocks(keyword) {
   if (!keyword || keyword.trim() === "") return [];
-  const kw = keyword.trim().toLowerCase();
+  const kw = toHalfWidth(keyword.trim()).toLowerCase();
   const results = [];
   for (const [code, name] of Object.entries(STOCK_LIST)) {
-    if (code.toLowerCase().includes(kw) || name.toLowerCase().includes(kw)) {
+    if (
+      toHalfWidth(code).toLowerCase().includes(kw) ||
+      name.toLowerCase().includes(kw)
+    ) {
       results.push({ code, name });
       if (results.length >= 10) break;
     }
@@ -45,23 +57,27 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
     setKeyword(val);
     setIsSelected(false);
 
-    if (val.trim() === "") {
+    const normalized = toHalfWidth(val.trim());
+
+    if (normalized === "") {
       setSuggestions([]);
       setShowDropdown(false);
       onSelect("", "");
       return;
     }
 
-    if (STOCK_LIST[val.trim()]) {
-      onSelect(val.trim(), STOCK_LIST[val.trim()]);
+    // 精確匹配代號
+    if (STOCK_LIST[normalized]) {
+      onSelect(normalized, STOCK_LIST[normalized]);
       setIsSelected(true);
       setShowDropdown(false);
       setSuggestions([]);
       return;
     }
 
+    // 精確匹配名稱
     const matchByName = Object.entries(STOCK_LIST).find(
-      ([, name]) => name === val.trim()
+      ([, name]) => name === normalized
     );
     if (matchByName) {
       onSelect(matchByName[0], matchByName[1]);
@@ -71,6 +87,7 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
       return;
     }
 
+    // 模糊搜尋
     const results = searchStocks(val);
     if (results.length === 1) {
       onSelect(results[0].code, results[0].name);
@@ -103,7 +120,7 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
           onFocus={() => {
             if (suggestions.length > 0 && !isSelected) setShowDropdown(true);
           }}
-          placeholder="輸入代號或名稱（如 2330 或 台積）"
+          placeholder="輸入代號或名稱（全形半形皆可）"
           className="w-full bg-zinc-800 text-white rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 pr-20"
         />
         {isSelected && (
@@ -143,11 +160,17 @@ export default function AddStockModal({ onClose, onAdd }) {
     date: new Date().toISOString().split("T")[0],
     note: "",
   });
+  const [dateInputType, setDateInputType] = useState("date");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const inputClass =
     "w-full bg-zinc-800 text-white rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500";
+
+  const handleDateChange = (e) => {
+    const val = e.target.value;
+    setTxForm({ ...txForm, date: val });
+  };
 
   const handleSubmit = async () => {
     setError("");
@@ -165,6 +188,12 @@ export default function AddStockModal({ onClose, onAdd }) {
     }
     if (!txForm.date) {
       setError("請選擇交易日期。");
+      return;
+    }
+    // 驗證日期格式
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(txForm.date)) {
+      setError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05");
       return;
     }
     setLoading(true);
@@ -222,6 +251,7 @@ export default function AddStockModal({ onClose, onAdd }) {
               </p>
             )}
           </div>
+
           <div>
             <label className="text-zinc-400 text-xs mb-1 block">買賣方向 *</label>
             <select
@@ -233,6 +263,7 @@ export default function AddStockModal({ onClose, onAdd }) {
               <option value="賣出">賣出</option>
             </select>
           </div>
+
           <div>
             <label className="text-zinc-400 text-xs mb-1 block">股數 *</label>
             <input
@@ -243,6 +274,7 @@ export default function AddStockModal({ onClose, onAdd }) {
               className={inputClass}
             />
           </div>
+
           <div>
             <label className="text-zinc-400 text-xs mb-1 block">
               成交價（元/股）*
@@ -255,15 +287,34 @@ export default function AddStockModal({ onClose, onAdd }) {
               className={inputClass}
             />
           </div>
+
           <div>
-            <label className="text-zinc-400 text-xs mb-1 block">交易日期 *</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-zinc-400 text-xs">交易日期 *</label>
+              <button
+                type="button"
+                onClick={() =>
+                  setDateInputType(dateInputType === "date" ? "text" : "date")
+                }
+                className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+              >
+                {dateInputType === "date" ? "切換手動輸入" : "切換日曆選擇"}
+              </button>
+            </div>
             <input
-              type="date"
+              type={dateInputType}
               value={txForm.date}
-              onChange={(e) => setTxForm({ ...txForm, date: e.target.value })}
+              onChange={handleDateChange}
+              placeholder="YYYY-MM-DD，例如：2026-04-05"
               className={inputClass}
             />
+            {dateInputType === "text" && (
+              <p className="text-zinc-600 text-xs mt-1">
+                格式：YYYY-MM-DD，例如：2026-04-05
+              </p>
+            )}
           </div>
+
           <div>
             <label className="text-zinc-400 text-xs mb-1 block">備註（選填）</label>
             <input

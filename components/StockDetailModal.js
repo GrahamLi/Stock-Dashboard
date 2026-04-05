@@ -2,6 +2,15 @@
 
 import { useState } from "react";
 
+// 全形轉半形
+function toHalfWidth(str) {
+  return str
+    .replace(/[\uff01-\uff5e]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) - 0xfee0)
+    )
+    .replace(/\u3000/g, " ");
+}
+
 export default function StockDetailModal({
   holding,
   transactions,
@@ -18,7 +27,6 @@ export default function StockDetailModal({
   const [editingTx, setEditingTx] = useState(null);
   const [showEditQuick, setShowEditQuick] = useState(false);
 
-  // 編輯交易紀錄表單
   const [txEditForm, setTxEditForm] = useState({
     shares: "",
     price: "",
@@ -27,7 +35,6 @@ export default function StockDetailModal({
     action: "",
   });
 
-  // 編輯建倉表單
   const [quickEditForm, setQuickEditForm] = useState({
     shares: "",
     avg_cost: "",
@@ -35,6 +42,7 @@ export default function StockDetailModal({
 
   const [editError, setEditError] = useState("");
   const [editLoading, setEditLoading] = useState(false);
+  const [dateInputType, setDateInputType] = useState("date");
 
   const currentPrice = holding.current_price || holding.avg_cost;
   const marketValue = currentPrice * holding.shares;
@@ -89,6 +97,7 @@ export default function StockDetailModal({
       note: tx.note || "",
       action: tx.action,
     });
+    setDateInputType("date");
     setEditError("");
   };
 
@@ -103,11 +112,15 @@ export default function StockDetailModal({
 
   const handleSaveTx = async () => {
     setEditError("");
-    if (!txEditForm.shares || isNaN(txEditForm.shares) || Number(txEditForm.shares) <= 0) {
+
+    const normalizedShares = toHalfWidth(String(txEditForm.shares));
+    const normalizedPrice = toHalfWidth(String(txEditForm.price));
+
+    if (!normalizedShares || isNaN(normalizedShares) || Number(normalizedShares) <= 0) {
       setEditError("股數請輸入正確數字。");
       return;
     }
-    if (!txEditForm.price || isNaN(txEditForm.price) || Number(txEditForm.price) <= 0) {
+    if (!normalizedPrice || isNaN(normalizedPrice) || Number(normalizedPrice) <= 0) {
       setEditError("成交價請輸入正確數字。");
       return;
     }
@@ -115,11 +128,17 @@ export default function StockDetailModal({
       setEditError("請選擇交易日期。");
       return;
     }
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(txEditForm.date)) {
+      setEditError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05");
+      return;
+    }
+
     setEditLoading(true);
     try {
       await onEditTransaction(editingTx.id, holding.code, {
-        shares: Number(txEditForm.shares),
-        price: Number(txEditForm.price),
+        shares: Number(normalizedShares),
+        price: Number(normalizedPrice),
         date: txEditForm.date,
         note: txEditForm.note,
         action: txEditForm.action,
@@ -135,19 +154,24 @@ export default function StockDetailModal({
 
   const handleSaveQuick = async () => {
     setEditError("");
-    if (!quickEditForm.shares || isNaN(quickEditForm.shares) || Number(quickEditForm.shares) <= 0) {
+
+    const normalizedShares = toHalfWidth(String(quickEditForm.shares));
+    const normalizedCost = toHalfWidth(String(quickEditForm.avg_cost));
+
+    if (!normalizedShares || isNaN(normalizedShares) || Number(normalizedShares) <= 0) {
       setEditError("股數請輸入正確數字。");
       return;
     }
-    if (!quickEditForm.avg_cost || isNaN(quickEditForm.avg_cost) || Number(quickEditForm.avg_cost) <= 0) {
+    if (!normalizedCost || isNaN(normalizedCost) || Number(normalizedCost) <= 0) {
       setEditError("平均成本請輸入正確數字。");
       return;
     }
+
     setEditLoading(true);
     try {
       await onEditQuickHolding(holding.id, {
-        shares: Number(quickEditForm.shares),
-        avg_cost: Number(quickEditForm.avg_cost),
+        shares: Number(normalizedShares),
+        avg_cost: Number(normalizedCost),
       });
       setShowEditQuick(false);
       onClose();
@@ -342,13 +366,30 @@ export default function StockDetailModal({
                 />
               </div>
               <div>
-                <label className="text-zinc-400 text-xs mb-1 block">交易日期</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-zinc-400 text-xs">交易日期</label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDateInputType(dateInputType === "date" ? "text" : "date")
+                    }
+                    className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+                  >
+                    {dateInputType === "date" ? "切換手動輸入" : "切換日曆選擇"}
+                  </button>
+                </div>
                 <input
-                  type="date"
+                  type={dateInputType}
                   value={txEditForm.date}
                   onChange={(e) => setTxEditForm({ ...txEditForm, date: e.target.value })}
+                  placeholder="YYYY-MM-DD，例如：2026-04-05"
                   className={inputClass}
                 />
+                {dateInputType === "text" && (
+                  <p className="text-zinc-600 text-xs mt-1">
+                    格式：YYYY-MM-DD，例如：2026-04-05
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">備註（選填）</label>
