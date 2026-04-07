@@ -1,4 +1,4 @@
-# CLAUDE.md - 專案背景說明 V3
+# CLAUDE.md - 專案背景說明 V04
 
 ## 專案簡介
 
@@ -51,16 +51,17 @@ stock-dashboard/
 │   ├── SummaryCards.js            # 總成本/市值/損益卡片
 │   ├── PieChart.js                # 持股佔比圓餅圖
 │   ├── LineChart.js               # 總資產走勢曲線圖
-│   ├── AccountSwitcher.js         # 帳戶切換器（新）
+│   ├── AccountSwitcher.js         # 帳戶切換器
 │   ├── StockTable.js              # 持股清單（點整行開彈窗）
-│   ├── StockDetailModal.js        # 個股詳情彈窗
+│   ├── StockDetailModal.js        # 個股詳情彈窗（含換帳戶功能）
 │   ├── AddStockModal.js           # 新增交易紀錄彈窗
 │   ├── QuickHoldingModal.js       # 快速建倉彈窗
+│   ├── EditStockModal.js          # 編輯持股彈窗
 │   ├── DailyChanges.js            # 庫存變動歷史紀錄
 │   └── UpdateButton.js            # 手動更新股價按鈕（含輪詢）
 ├── lib/
 │   ├── firebase.js
-│   ├── firestore.js               # 核心資料庫操作 V06
+│   ├── firestore.js               # 核心資料庫操作 V08
 │   └── stockList.js               # 台股代號對照表（2262筆）
 ├── scripts/
 │   └── update_prices.py           # GitHub Actions 抓股價腳本 V02
@@ -78,7 +79,7 @@ stock-dashboard/
 user_id: string
 code: string
 name: string
-account: string          帳戶名稱（預設「預設帳戶」）
+account: string          帳戶名稱（使用者自訂，無預設帳戶）
 shares: number           由 FIFO 計算
 initial_shares: number   快速建倉原始股數（T0）
 t0_avg_cost: number      快速建倉平均成本（獨立，不被 FIFO 影響）
@@ -111,7 +112,7 @@ total_value: number
 total_cost: number
 ```
 
-### accounts（帳戶）- 新 collection
+### accounts（帳戶）
 ```
 user_id: string
 name: string             帳戶名稱（自訂）
@@ -120,13 +121,18 @@ created_at: timestamp
 
 ---
 
-## 核心計算邏輯（lib/firestore.js V06）
+## 核心計算邏輯（lib/firestore.js V08）
 
 ### FIFO 計算規則
 - 每個帳戶獨立跑 FIFO，不同帳戶的同一股票互不影響
 - 快速建倉視為 T0（最早），成本存入 t0_avg_cost
 - 多次快速建倉合併：股數相加，成本加權平均
 - avg_cost 由 FIFO 計算（T0 + 交易紀錄）
+
+### 換帳戶後 FIFO 重算
+- moveTransaction：交易紀錄移到新帳戶，舊帳戶和新帳戶兩邊各自重算 FIFO
+- moveQuickHolding：快速建倉移到新帳戶，舊帳戶移除 T0 重算，新帳戶合併 T0 重算
+- current_price 不參與計算，換帳戶後建議手動更新股價
 
 ### 已實現損益計算
 - 按帳戶分開計算，各帳戶分別算完再加總
@@ -150,7 +156,8 @@ created_at: timestamp
 | 刪除 | 需先賣出所有持股才能刪除 |
 | 刪除後 | 帳戶從切換器消失，歷史紀錄保留 |
 | 全部帳戶 | 含已刪除帳戶的歷史紀錄 |
-| 預設帳戶 | 不能刪除，舊資料自動歸類 |
+| 預設帳戶 | 已移除，新使用者必須自行建立帳戶 |
+| 帳戶空白 | 顯示引導提示，新增交易/建倉前須先建立帳戶 |
 
 ---
 
@@ -163,6 +170,7 @@ created_at: timestamp
 | 快速建倉 | 持股清單標題旁「＋ 快速建倉」 |
 | 新增交易紀錄 | 右下角「＋ 新增交易」浮動按鈕 |
 | 個股詳情/編輯/刪除 | 點持股清單任一行 |
+| 編輯交易/建倉帳戶 | 個股詳情彈窗內點「編輯」，帳戶下拉可更換 |
 | 庫存變動歷史紀錄 | 頁面下方（6個Tab） |
 | 手動更新股價 | 頂部「↻ 更新股價」按鈕 |
 
@@ -170,6 +178,11 @@ created_at: timestamp
 ```
 交易紀錄 | 每日持股快照 | 當天已實現損益 | 當月已實現損益 | 當年已實現損益 | 損益區間查詢
 ```
+
+### 彈窗操作規則
+- 所有彈窗均支援 ESC 鍵關閉
+- 多層彈窗時 ESC 優先關閉最上層，逐層往回
+- 更新中/成功/失敗提示層不支援 ESC（避免誤關）
 
 ---
 
@@ -219,17 +232,11 @@ service cloud.firestore {
 
 ---
 
-## 已知問題（待修正）
-
-- 帳戶切換器在某些狀況下不顯示（fetchAccounts 回傳空陣列時）
-- 新增交易/快速建倉的帳戶下拉選單在 accounts 為空時異常
-
----
-
 ## 開發指令
 
 ```bash
 npm run dev
+npm test        # 執行 Jest 單元測試（__tests__/fifo.test.js）
 git add .
 git commit -m "..."
 git push

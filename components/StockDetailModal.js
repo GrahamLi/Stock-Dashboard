@@ -1,4 +1,3 @@
-
 "use client";
 
 // =============================================================================
@@ -9,9 +8,11 @@
 // V02 - 編輯交易紀錄彈窗加入帳戶下拉，支援換帳戶
 //       編輯建倉彈窗加入帳戶下拉，支援換帳戶
 //       新增 accounts prop，新增 onMoveTransaction / onMoveQuickHolding prop
+// V03 - 所有彈窗支援 ESC 鍵關閉
+//       修正換帳戶順序：先 move 再 edit
 // =============================================================================
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 function toHalfWidth(str) {
   return str
@@ -43,13 +44,8 @@ function calcSellCostPrice(tx, allTx, holding) {
     } else if (t.action === "賣出") {
       let rem = t.shares;
       while (rem > 0 && batches.length > 0) {
-        if (batches[0].shares <= rem) {
-          rem -= batches[0].shares;
-          batches.shift();
-        } else {
-          batches[0].shares -= rem;
-          rem = 0;
-        }
+        if (batches[0].shares <= rem) { rem -= batches[0].shares; batches.shift(); }
+        else { batches[0].shares -= rem; rem = 0; }
       }
     }
   }
@@ -85,7 +81,6 @@ export default function StockDetailModal({
   onMoveQuickHolding,
 }) {
   if (!holding) return null;
-  console.log("StockDetailModal accounts:", accounts);
 
   const [deletingTxId, setDeletingTxId] = useState(null);
   const [showDeleteQuick, setShowDeleteQuick] = useState(false);
@@ -100,6 +95,20 @@ export default function StockDetailModal({
   const [editError, setEditError] = useState("");
   const [editLoading, setEditLoading] = useState(false);
   const [dateInputType, setDateInputType] = useState("date");
+
+  // ESC 鍵關閉：優先關閉最上層的子彈窗，最後才關主彈窗
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      if (deletingTxId) { setDeletingTxId(null); return; }
+      if (showDeleteQuick) { setShowDeleteQuick(false); return; }
+      if (editingTx) { setEditingTx(null); setEditError(""); return; }
+      if (showEditQuick) { setShowEditQuick(false); setEditError(""); return; }
+      onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [deletingTxId, showDeleteQuick, editingTx, showEditQuick, onClose]);
 
   const currentPrice = holding.current_price || holding.avg_cost;
   const marketValue = currentPrice * holding.shares;
@@ -149,11 +158,8 @@ export default function StockDetailModal({
   const openEditTx = (tx) => {
     setEditingTx(tx);
     setTxEditForm({
-      shares: tx.shares,
-      price: tx.price,
-      date: tx.date,
-      note: tx.note || "",
-      action: tx.action,
+      shares: tx.shares, price: tx.price, date: tx.date,
+      note: tx.note || "", action: tx.action,
       account: tx.account || holding.account || "預設帳戶",
     });
     setDateInputType("date");
@@ -181,9 +187,7 @@ export default function StockDetailModal({
     if (!normalizedPrice || isNaN(normalizedPrice) || Number(normalizedPrice) <= 0) {
       setEditError("成交價請輸入正確數字。"); return;
     }
-    if (!txEditForm.date) {
-      setEditError("請選擇交易日期。"); return;
-    }
+    if (!txEditForm.date) { setEditError("請選擇交易日期。"); return; }
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(txEditForm.date)) {
       setEditError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05"); return;
@@ -194,28 +198,16 @@ export default function StockDetailModal({
       const oldAccount = editingTx.account || holding.account || "預設帳戶";
       const newAccount = txEditForm.account;
 
-      // 先更新交易內容（買賣/股數/價格/日期/備註）
-      await onEditTransaction(
-        editingTx.id,
-        holding.code,
-        oldAccount,
-        {
-          shares: Number(normalizedShares),
-          price: Number(normalizedPrice),
-          date: txEditForm.date,
-          note: txEditForm.note,
-          action: txEditForm.action,
-        }
-      );
+      await onEditTransaction(editingTx.id, holding.code, oldAccount, {
+        shares: Number(normalizedShares),
+        price: Number(normalizedPrice),
+        date: txEditForm.date,
+        note: txEditForm.note,
+        action: txEditForm.action,
+      });
 
-      // 若帳戶有變更，再執行移動
       if (newAccount !== oldAccount) {
-        await onMoveTransaction(
-          editingTx.id,
-          holding.code,
-          oldAccount,
-          newAccount
-        );
+        await onMoveTransaction(editingTx.id, holding.code, oldAccount, newAccount);
       }
 
       setEditingTx(null);
@@ -244,16 +236,14 @@ export default function StockDetailModal({
       const oldAccount = holding.account || "預設帳戶";
       const newAccount = quickEditForm.account;
 
-      // 先更新建倉內容（股數/成本）
+      // 先移動帳戶（若有變更），再更新內容
+      if (newAccount !== oldAccount) {
+        await onMoveQuickHolding(holding.id, newAccount);
+      }
       await onEditQuickHolding(holding.id, {
         shares: Number(normalizedShares),
         avg_cost: Number(normalizedCost),
       });
-
-      // 若帳戶有變更，再執行移動
-      if (newAccount !== oldAccount) {
-        await onMoveQuickHolding(holding.id, newAccount);
-      }
 
       setShowEditQuick(false);
       onClose();
@@ -284,15 +274,9 @@ export default function StockDetailModal({
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-4 text-sm mt-2">
-                  <span className="text-zinc-400">
-                    持股：<span className="text-white">{formatShares(holding.shares)}</span>
-                  </span>
-                  <span className="text-zinc-400">
-                    均成本：<span className="text-white">${formatMoney(holding.avg_cost)}</span>
-                  </span>
-                  <span className="text-zinc-400">
-                    現價：<span className="text-white">${formatMoney(currentPrice)}</span>
-                  </span>
+                  <span className="text-zinc-400">持股：<span className="text-white">{formatShares(holding.shares)}</span></span>
+                  <span className="text-zinc-400">均成本：<span className="text-white">${formatMoney(holding.avg_cost)}</span></span>
+                  <span className="text-zinc-400">現價：<span className="text-white">${formatMoney(currentPrice)}</span></span>
                   <span className="text-zinc-400">
                     未實現損益：
                     <span className={`font-medium ${isPositive ? "text-green-400" : "text-red-400"}`}>
@@ -301,21 +285,14 @@ export default function StockDetailModal({
                   </span>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="text-zinc-400 hover:text-white transition-colors text-xl ml-4 shrink-0"
-              >
-                ✕
-              </button>
+              <button onClick={onClose} className="text-zinc-400 hover:text-white transition-colors text-xl ml-4 shrink-0">✕</button>
             </div>
           </div>
 
           {/* 交易紀錄列表 */}
           <div className="overflow-y-auto flex-1">
             {stockTx.length === 0 && !hasQuickHolding ? (
-              <div className="p-8 text-center">
-                <p className="text-zinc-500 text-sm">尚無交易紀錄</p>
-              </div>
+              <div className="p-8 text-center"><p className="text-zinc-500 text-sm">尚無交易紀錄</p></div>
             ) : (
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-zinc-900">
@@ -335,98 +312,49 @@ export default function StockDetailModal({
                     const costPrice = calcSellCostPrice(tx, stockTx, holding);
                     const isProfit = costPrice !== null && tx.price >= costPrice;
                     return (
-                      <tr
-                        key={tx.id}
-                        className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors"
-                      >
+                      <tr key={tx.id} className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors">
                         <td className="px-4 py-3 text-zinc-300 text-xs">{tx.date}</td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                            tx.action === "買入"
-                              ? "bg-green-400/10 text-green-400"
-                              : "bg-red-400/10 text-red-400"
-                          }`}>
+                          <span className={`text-xs font-medium px-2 py-1 rounded-full ${tx.action === "買入" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
                             {tx.action}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right text-zinc-300">
-                          {formatShares(tx.shares)}
-                        </td>
-                        <td className="px-4 py-3 text-right text-zinc-300">
-                          ${formatMoney(tx.price)}
-                        </td>
+                        <td className="px-4 py-3 text-right text-zinc-300">{formatShares(tx.shares)}</td>
+                        <td className="px-4 py-3 text-right text-zinc-300">${formatMoney(tx.price)}</td>
                         <td className="px-4 py-3 text-right text-xs">
                           {tx.action === "賣出" && costPrice !== null ? (
-                            <span className={isProfit ? "text-green-400" : "text-red-400"}>
-                              ${formatMoney(costPrice)}
-                            </span>
+                            <span className={isProfit ? "text-green-400" : "text-red-400"}>${formatMoney(costPrice)}</span>
                           ) : (
                             <span className="text-zinc-600">-</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right text-zinc-300">
-                          ${formatMoney(tx.shares * tx.price)}
-                        </td>
-                        <td className="px-4 py-3 text-zinc-400 text-xs">
-                          {tx.note || "-"}
-                        </td>
+                        <td className="px-4 py-3 text-right text-zinc-300">${formatMoney(tx.shares * tx.price)}</td>
+                        <td className="px-4 py-3 text-zinc-400 text-xs">{tx.note || "-"}</td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => openEditTx(tx)}
-                              className="text-zinc-500 hover:text-blue-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-blue-500"
-                            >
-                              編輯
-                            </button>
-                            <button
-                              onClick={() => setDeletingTxId(tx.id)}
-                              className="text-zinc-500 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-500"
-                            >
-                              刪除
-                            </button>
+                            <button onClick={() => openEditTx(tx)} className="text-zinc-500 hover:text-blue-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-blue-500">編輯</button>
+                            <button onClick={() => setDeletingTxId(tx.id)} className="text-zinc-500 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-500">刪除</button>
                           </div>
                         </td>
                       </tr>
                     );
                   })}
 
-                  {/* T0 快速建倉 */}
                   {hasQuickHolding && (
                     <tr className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors bg-zinc-800/30">
                       <td className="px-4 py-3 text-zinc-500 text-xs">－</td>
                       <td className="px-4 py-3 text-center">
-                        <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-400/10 text-blue-400">
-                          建倉
-                        </span>
+                        <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-400/10 text-blue-400">建倉</span>
                       </td>
-                      <td className="px-4 py-3 text-right text-zinc-400">
-                        {formatShares(holding.initial_shares || holding.shares)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-zinc-400">
-                        ${formatMoney(holding.t0_avg_cost || holding.avg_cost)}
-                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-400">{formatShares(holding.initial_shares || holding.shares)}</td>
+                      <td className="px-4 py-3 text-right text-zinc-400">${formatMoney(holding.t0_avg_cost || holding.avg_cost)}</td>
                       <td className="px-4 py-3 text-right text-zinc-600 text-xs">-</td>
-                      <td className="px-4 py-3 text-right text-zinc-400">
-                        ${formatMoney(
-                          (holding.initial_shares || holding.shares) *
-                          (holding.t0_avg_cost || holding.avg_cost)
-                        )}
-                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-400">${formatMoney((holding.initial_shares || holding.shares) * (holding.t0_avg_cost || holding.avg_cost))}</td>
                       <td className="px-4 py-3 text-zinc-500 text-xs">快速建倉</td>
                       <td className="px-4 py-3 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={openEditQuick}
-                            className="text-zinc-500 hover:text-blue-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-blue-500"
-                          >
-                            編輯
-                          </button>
-                          <button
-                            onClick={() => setShowDeleteQuick(true)}
-                            className="text-zinc-500 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-500"
-                          >
-                            刪除
-                          </button>
+                          <button onClick={openEditQuick} className="text-zinc-500 hover:text-blue-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-blue-500">編輯</button>
+                          <button onClick={() => setShowDeleteQuick(true)} className="text-zinc-500 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-500">刪除</button>
                         </div>
                       </td>
                     </tr>
@@ -446,98 +374,44 @@ export default function StockDetailModal({
             <div className="flex flex-col gap-3">
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">帳戶</label>
-                <select
-                  value={txEditForm.account}
-                  onChange={(e) => setTxEditForm({ ...txEditForm, account: e.target.value })}
-                  className={inputClass}
-                >
-                  {(accounts || []).map((a) => (
-                    <option key={a.id} value={a.name}>
-                      {a.name}
-                    </option>
-                  ))}
+                <select value={txEditForm.account} onChange={(e) => setTxEditForm({ ...txEditForm, account: e.target.value })} className={inputClass}>
+                  {(accounts || []).map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">買賣方向</label>
-                <select
-                  value={txEditForm.action}
-                  onChange={(e) => setTxEditForm({ ...txEditForm, action: e.target.value })}
-                  className={inputClass}
-                >
+                <select value={txEditForm.action} onChange={(e) => setTxEditForm({ ...txEditForm, action: e.target.value })} className={inputClass}>
                   <option value="買入">買入</option>
                   <option value="賣出">賣出</option>
                 </select>
               </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">股數</label>
-                <input
-                  type="number"
-                  value={txEditForm.shares}
-                  onChange={(e) => setTxEditForm({ ...txEditForm, shares: e.target.value })}
-                  className={inputClass}
-                />
+                <input type="number" value={txEditForm.shares} onChange={(e) => setTxEditForm({ ...txEditForm, shares: e.target.value })} className={inputClass} />
               </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">成交價（元/股）</label>
-                <input
-                  type="number"
-                  value={txEditForm.price}
-                  onChange={(e) => setTxEditForm({ ...txEditForm, price: e.target.value })}
-                  className={inputClass}
-                />
+                <input type="number" value={txEditForm.price} onChange={(e) => setTxEditForm({ ...txEditForm, price: e.target.value })} className={inputClass} />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-zinc-400 text-xs">交易日期</label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDateInputType(dateInputType === "date" ? "text" : "date")
-                    }
-                    className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
-                  >
+                  <button type="button" onClick={() => setDateInputType(dateInputType === "date" ? "text" : "date")} className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
                     {dateInputType === "date" ? "切換手動輸入" : "切換日曆選擇"}
                   </button>
                 </div>
-                <input
-                  type={dateInputType}
-                  value={txEditForm.date}
-                  onChange={(e) => setTxEditForm({ ...txEditForm, date: e.target.value })}
-                  placeholder="YYYY-MM-DD"
-                  className={inputClass}
-                />
-                {dateInputType === "text" && (
-                  <p className="text-zinc-600 text-xs mt-1">格式：YYYY-MM-DD，例如：2026-04-05</p>
-                )}
+                <input type={dateInputType} value={txEditForm.date} onChange={(e) => setTxEditForm({ ...txEditForm, date: e.target.value })} placeholder="YYYY-MM-DD" className={inputClass} />
+                {dateInputType === "text" && <p className="text-zinc-600 text-xs mt-1">格式：YYYY-MM-DD，例如：2026-04-05</p>}
               </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">備註（選填）</label>
-                <input
-                  type="text"
-                  value={txEditForm.note}
-                  onChange={(e) => setTxEditForm({ ...txEditForm, note: e.target.value })}
-                  className={inputClass}
-                />
+                <input type="text" value={txEditForm.note} onChange={(e) => setTxEditForm({ ...txEditForm, note: e.target.value })} className={inputClass} />
               </div>
             </div>
-            {editError && (
-              <p className="text-red-400 text-xs text-center mt-3">{editError}</p>
-            )}
+            {editError && <p className="text-red-400 text-xs text-center mt-3">{editError}</p>}
             <div className="flex gap-3 mt-5">
-              <button
-                onClick={() => { setEditingTx(null); setEditError(""); }}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleSaveTx}
-                disabled={editLoading}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-sm py-2.5 rounded-lg transition-colors font-medium"
-              >
-                {editLoading ? "儲存中..." : "儲存"}
-              </button>
+              <button onClick={() => { setEditingTx(null); setEditError(""); }} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors">取消</button>
+              <button onClick={handleSaveTx} disabled={editLoading} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-sm py-2.5 rounded-lg transition-colors font-medium">{editLoading ? "儲存中..." : "儲存"}</button>
             </div>
           </div>
         </div>
@@ -551,54 +425,23 @@ export default function StockDetailModal({
             <div className="flex flex-col gap-3">
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">帳戶</label>
-                <select
-                  value={quickEditForm.account}
-                  onChange={(e) => setQuickEditForm({ ...quickEditForm, account: e.target.value })}
-                  className={inputClass}
-                >
-                  {(accounts || []).map((a) => (
-                    <option key={a.id} value={a.name}>
-                      {a.name}
-                    </option>
-                  ))}
+                <select value={quickEditForm.account} onChange={(e) => setQuickEditForm({ ...quickEditForm, account: e.target.value })} className={inputClass}>
+                  {(accounts || []).map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">建倉股數</label>
-                <input
-                  type="number"
-                  value={quickEditForm.shares}
-                  onChange={(e) => setQuickEditForm({ ...quickEditForm, shares: e.target.value })}
-                  className={inputClass}
-                />
+                <input type="number" value={quickEditForm.shares} onChange={(e) => setQuickEditForm({ ...quickEditForm, shares: e.target.value })} className={inputClass} />
               </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">平均成本（元/股）</label>
-                <input
-                  type="number"
-                  value={quickEditForm.avg_cost}
-                  onChange={(e) => setQuickEditForm({ ...quickEditForm, avg_cost: e.target.value })}
-                  className={inputClass}
-                />
+                <input type="number" value={quickEditForm.avg_cost} onChange={(e) => setQuickEditForm({ ...quickEditForm, avg_cost: e.target.value })} className={inputClass} />
               </div>
             </div>
-            {editError && (
-              <p className="text-red-400 text-xs text-center mt-3">{editError}</p>
-            )}
+            {editError && <p className="text-red-400 text-xs text-center mt-3">{editError}</p>}
             <div className="flex gap-3 mt-5">
-              <button
-                onClick={() => { setShowEditQuick(false); setEditError(""); }}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleSaveQuick}
-                disabled={editLoading}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-sm py-2.5 rounded-lg transition-colors font-medium"
-              >
-                {editLoading ? "儲存中..." : "儲存"}
-              </button>
+              <button onClick={() => { setShowEditQuick(false); setEditError(""); }} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors">取消</button>
+              <button onClick={handleSaveQuick} disabled={editLoading} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-sm py-2.5 rounded-lg transition-colors font-medium">{editLoading ? "儲存中..." : "儲存"}</button>
             </div>
           </div>
         </div>
@@ -609,25 +452,11 @@ export default function StockDetailModal({
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] px-4">
           <div className="w-full max-w-sm bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
             <h2 className="text-white font-bold text-lg mb-2">確認刪除交易紀錄</h2>
-            <p className="text-zinc-400 text-sm mb-2">
-              刪除後系統將重新計算此股票的持股數量和平均成本。
-            </p>
-            <p className="text-yellow-400 text-xs mb-6">
-              ⚠️ 此操作無法復原，請確認後再執行。
-            </p>
+            <p className="text-zinc-400 text-sm mb-2">刪除後系統將重新計算此股票的持股數量和平均成本。</p>
+            <p className="text-yellow-400 text-xs mb-6">⚠️ 此操作無法復原，請確認後再執行。</p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setDeletingTxId(null)}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => handleDeleteTx(deletingTxId)}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm py-2.5 rounded-lg transition-colors font-medium"
-              >
-                確認刪除
-              </button>
+              <button onClick={() => setDeletingTxId(null)} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors">取消</button>
+              <button onClick={() => handleDeleteTx(deletingTxId)} className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm py-2.5 rounded-lg transition-colors font-medium">確認刪除</button>
             </div>
           </div>
         </div>
@@ -638,25 +467,11 @@ export default function StockDetailModal({
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] px-4">
           <div className="w-full max-w-sm bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
             <h2 className="text-white font-bold text-lg mb-2">確認刪除建倉</h2>
-            <p className="text-zinc-400 text-sm mb-2">
-              刪除建倉後，此股票的 T0 成本將被移除。
-            </p>
-            <p className="text-yellow-400 text-xs mb-6">
-              ⚠️ 此操作無法復原，請確認後再執行。
-            </p>
+            <p className="text-zinc-400 text-sm mb-2">刪除建倉後，此股票的 T0 成本將被移除。</p>
+            <p className="text-yellow-400 text-xs mb-6">⚠️ 此操作無法復原，請確認後再執行。</p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setShowDeleteQuick(false)}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleDeleteQuick}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm py-2.5 rounded-lg transition-colors font-medium"
-              >
-                確認刪除
-              </button>
+              <button onClick={() => setShowDeleteQuick(false)} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm py-2.5 rounded-lg transition-colors">取消</button>
+              <button onClick={handleDeleteQuick} className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm py-2.5 rounded-lg transition-colors font-medium">確認刪除</button>
             </div>
           </div>
         </div>
