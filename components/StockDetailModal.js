@@ -1,4 +1,15 @@
+
 "use client";
+
+// =============================================================================
+// StockDetailModal.js
+// =============================================================================
+// Revision Change List:
+// V01 - 初始版本，個股詳情、編輯/刪除交易紀錄、編輯/刪除建倉
+// V02 - 編輯交易紀錄彈窗加入帳戶下拉，支援換帳戶
+//       編輯建倉彈窗加入帳戶下拉，支援換帳戶
+//       新增 accounts prop，新增 onMoveTransaction / onMoveQuickHolding prop
+// =============================================================================
 
 import { useState } from "react";
 
@@ -64,23 +75,27 @@ function calcSellCostPrice(tx, allTx, holding) {
 export default function StockDetailModal({
   holding,
   transactions,
+  accounts,
   onClose,
   onDeleteTransaction,
   onDeleteQuickHolding,
   onEditTransaction,
   onEditQuickHolding,
+  onMoveTransaction,
+  onMoveQuickHolding,
 }) {
   if (!holding) return null;
+  console.log("StockDetailModal accounts:", accounts);
 
   const [deletingTxId, setDeletingTxId] = useState(null);
   const [showDeleteQuick, setShowDeleteQuick] = useState(false);
   const [editingTx, setEditingTx] = useState(null);
   const [showEditQuick, setShowEditQuick] = useState(false);
   const [txEditForm, setTxEditForm] = useState({
-    shares: "", price: "", date: "", note: "", action: "",
+    shares: "", price: "", date: "", note: "", action: "", account: "",
   });
   const [quickEditForm, setQuickEditForm] = useState({
-    shares: "", avg_cost: "",
+    shares: "", avg_cost: "", account: "",
   });
   const [editError, setEditError] = useState("");
   const [editLoading, setEditLoading] = useState(false);
@@ -134,8 +149,12 @@ export default function StockDetailModal({
   const openEditTx = (tx) => {
     setEditingTx(tx);
     setTxEditForm({
-      shares: tx.shares, price: tx.price,
-      date: tx.date, note: tx.note || "", action: tx.action,
+      shares: tx.shares,
+      price: tx.price,
+      date: tx.date,
+      note: tx.note || "",
+      action: tx.action,
+      account: tx.account || holding.account || "預設帳戶",
     });
     setDateInputType("date");
     setEditError("");
@@ -145,6 +164,7 @@ export default function StockDetailModal({
     setQuickEditForm({
       shares: holding.initial_shares || holding.shares,
       avg_cost: holding.t0_avg_cost || holding.avg_cost,
+      account: holding.account || "預設帳戶",
     });
     setShowEditQuick(true);
     setEditError("");
@@ -168,12 +188,17 @@ export default function StockDetailModal({
     if (!dateRegex.test(txEditForm.date)) {
       setEditError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05"); return;
     }
+
     setEditLoading(true);
     try {
+      const oldAccount = editingTx.account || holding.account || "預設帳戶";
+      const newAccount = txEditForm.account;
+
+      // 先更新交易內容（買賣/股數/價格/日期/備註）
       await onEditTransaction(
         editingTx.id,
         holding.code,
-        holding.account || "預設帳戶",
+        oldAccount,
         {
           shares: Number(normalizedShares),
           price: Number(normalizedPrice),
@@ -182,6 +207,17 @@ export default function StockDetailModal({
           action: txEditForm.action,
         }
       );
+
+      // 若帳戶有變更，再執行移動
+      if (newAccount !== oldAccount) {
+        await onMoveTransaction(
+          editingTx.id,
+          holding.code,
+          oldAccount,
+          newAccount
+        );
+      }
+
       setEditingTx(null);
       onClose();
     } catch (err) {
@@ -202,12 +238,23 @@ export default function StockDetailModal({
     if (!normalizedCost || isNaN(normalizedCost) || Number(normalizedCost) <= 0) {
       setEditError("平均成本請輸入正確數字。"); return;
     }
+
     setEditLoading(true);
     try {
+      const oldAccount = holding.account || "預設帳戶";
+      const newAccount = quickEditForm.account;
+
+      // 先更新建倉內容（股數/成本）
       await onEditQuickHolding(holding.id, {
         shares: Number(normalizedShares),
         avg_cost: Number(normalizedCost),
       });
+
+      // 若帳戶有變更，再執行移動
+      if (newAccount !== oldAccount) {
+        await onMoveQuickHolding(holding.id, newAccount);
+      }
+
       setShowEditQuick(false);
       onClose();
     } catch (err) {
@@ -398,6 +445,20 @@ export default function StockDetailModal({
             <h2 className="text-white font-bold text-lg mb-4">編輯交易紀錄</h2>
             <div className="flex flex-col gap-3">
               <div>
+                <label className="text-zinc-400 text-xs mb-1 block">帳戶</label>
+                <select
+                  value={txEditForm.account}
+                  onChange={(e) => setTxEditForm({ ...txEditForm, account: e.target.value })}
+                  className={inputClass}
+                >
+                  {(accounts || []).map((a) => (
+                    <option key={a.id} value={a.name}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="text-zinc-400 text-xs mb-1 block">買賣方向</label>
                 <select
                   value={txEditForm.action}
@@ -488,6 +549,20 @@ export default function StockDetailModal({
           <div className="w-full max-w-sm bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
             <h2 className="text-white font-bold text-lg mb-4">編輯建倉</h2>
             <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-zinc-400 text-xs mb-1 block">帳戶</label>
+                <select
+                  value={quickEditForm.account}
+                  onChange={(e) => setQuickEditForm({ ...quickEditForm, account: e.target.value })}
+                  className={inputClass}
+                >
+                  {(accounts || []).map((a) => (
+                    <option key={a.id} value={a.name}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="text-zinc-400 text-xs mb-1 block">建倉股數</label>
                 <input

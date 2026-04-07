@@ -1,5 +1,14 @@
 "use client";
 
+// =============================================================================
+// app/dashboard/page.js
+// =============================================================================
+// Revision Change List:
+// V01 - 初始版本，儀表板主頁，整合所有元件與資料操作
+// V02 - 新增 handleMoveTransaction / handleMoveQuickHolding handler
+//       StockTable 補傳 accounts / onMoveTransaction / onMoveQuickHolding
+// =============================================================================
+
 import { useState, useEffect } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -16,6 +25,8 @@ import {
   editTransaction,
   editQuickHolding,
   deleteQuickHolding,
+  moveTransaction,
+  moveQuickHolding,
 } from "@/lib/firestore";
 import AuthGuard from "@/components/AuthGuard";
 import Navbar from "@/components/Navbar";
@@ -175,6 +186,26 @@ export default function DashboardPage() {
     }
   };
 
+  const handleMoveTransaction = async (txId, code, oldAccount, newAccount) => {
+    try {
+      await moveTransaction(user.uid, txId, code, oldAccount, newAccount);
+      await fetchAll();
+    } catch (err) {
+      console.error("移動交易紀錄失敗：", err);
+      throw err;
+    }
+  };
+
+  const handleMoveQuickHolding = async (holdingId, newAccount) => {
+    try {
+      await moveQuickHolding(user.uid, holdingId, newAccount);
+      await fetchAll();
+    } catch (err) {
+      console.error("移動快速建倉失敗：", err);
+      throw err;
+    }
+  };
+
   const formatLastUpdated = (date) => {
     if (!date) return "";
     return date.toLocaleString("zh-TW", {
@@ -235,12 +266,15 @@ export default function DashboardPage() {
               <StockTable
                 holdings={filteredHoldings}
                 transactions={filteredTransactions}
+                accounts={accounts}
                 onEdit={handleEditStock}
                 onDelete={handleDeleteStock}
                 onDeleteTransaction={handleDeleteTransaction}
                 onDeleteQuickHolding={handleDeleteQuickHolding}
                 onEditTransaction={handleEditTransaction}
                 onEditQuickHolding={handleEditQuickHolding}
+                onMoveTransaction={handleMoveTransaction}
+                onMoveQuickHolding={handleMoveQuickHolding}
               />
             </div>
 

@@ -1,17 +1,28 @@
 "use client";
 
+// =============================================================================
+// StockTable.js
+// =============================================================================
+// Revision Change List:
+// V01 - 初始版本，持股清單表格，點整行開 StockDetailModal
+// V02 - 補傳 accounts / onMoveTransaction / onMoveQuickHolding 給 StockDetailModal
+// =============================================================================
+
 import { useState } from "react";
 import StockDetailModal from "@/components/StockDetailModal";
 
 export default function StockTable({
   holdings,
   transactions,
+  accounts,
   onEdit,
   onDelete,
   onDeleteTransaction,
   onDeleteQuickHolding,
   onEditTransaction,
   onEditQuickHolding,
+  onMoveTransaction,
+  onMoveQuickHolding,
 }) {
   const [detailHolding, setDetailHolding] = useState(null);
 
@@ -107,6 +118,7 @@ export default function StockTable({
         <StockDetailModal
           holding={detailHolding}
           transactions={transactions}
+          accounts={accounts}
           onClose={() => setDetailHolding(null)}
           onEdit={onEdit}
           onDelete={onDelete}
@@ -114,6 +126,8 @@ export default function StockTable({
           onDeleteQuickHolding={onDeleteQuickHolding}
           onEditTransaction={onEditTransaction}
           onEditQuickHolding={onEditQuickHolding}
+          onMoveTransaction={onMoveTransaction}
+          onMoveQuickHolding={onMoveQuickHolding}
         />
       )}
     </>
