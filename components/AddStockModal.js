@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import STOCK_LIST from "@/lib/stockList";
 
-// 全形轉半形
 function toHalfWidth(str) {
   return str
     .replace(/[\uff01-\uff5e]/g, (ch) =>
@@ -66,7 +65,6 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
       return;
     }
 
-    // 精確匹配代號
     if (STOCK_LIST[normalized]) {
       onSelect(normalized, STOCK_LIST[normalized]);
       setIsSelected(true);
@@ -75,7 +73,6 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
       return;
     }
 
-    // 精確匹配名稱
     const matchByName = Object.entries(STOCK_LIST).find(
       ([, name]) => name === normalized
     );
@@ -87,7 +84,6 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
       return;
     }
 
-    // 模糊搜尋
     const results = searchStocks(val);
     if (results.length === 1) {
       onSelect(results[0].code, results[0].name);
@@ -150,7 +146,7 @@ function StockSearchInput({ codeValue, nameValue, onSelect }) {
   );
 }
 
-export default function AddStockModal({ onClose, onAdd }) {
+export default function AddStockModal({ onClose, onAdd, accounts, defaultAccount }) {
   const [txForm, setTxForm] = useState({
     code: "",
     name: "",
@@ -159,6 +155,7 @@ export default function AddStockModal({ onClose, onAdd }) {
     price: "",
     date: new Date().toISOString().split("T")[0],
     note: "",
+    account: defaultAccount || "預設帳戶",
   });
   const [dateInputType, setDateInputType] = useState("date");
   const [error, setError] = useState("");
@@ -166,11 +163,6 @@ export default function AddStockModal({ onClose, onAdd }) {
 
   const inputClass =
     "w-full bg-zinc-800 text-white rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500";
-
-  const handleDateChange = (e) => {
-    const val = e.target.value;
-    setTxForm({ ...txForm, date: val });
-  };
 
   const handleSubmit = async () => {
     setError("");
@@ -190,10 +182,13 @@ export default function AddStockModal({ onClose, onAdd }) {
       setError("請選擇交易日期。");
       return;
     }
-    // 驗證日期格式
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(txForm.date)) {
       setError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05");
+      return;
+    }
+    if (!txForm.account) {
+      setError("請選擇帳戶。");
       return;
     }
     setLoading(true);
@@ -207,11 +202,12 @@ export default function AddStockModal({ onClose, onAdd }) {
         price: Number(txForm.price),
         date: txForm.date,
         note: txForm.note.trim(),
+        account: txForm.account,
         has_transaction_history: true,
       });
       onClose();
     } catch (err) {
-      setError("新增失敗，請稍後再試。");
+      setError(err.message || "新增失敗，請稍後再試。");
     } finally {
       setLoading(false);
     }
@@ -236,6 +232,21 @@ export default function AddStockModal({ onClose, onAdd }) {
         </div>
 
         <div className="flex flex-col gap-3">
+          <div>
+            <label className="text-zinc-400 text-xs mb-1 block">帳戶 *</label>
+            <select
+              value={txForm.account}
+              onChange={(e) => setTxForm({ ...txForm, account: e.target.value })}
+              className={inputClass}
+            >
+              {accounts.map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className="text-zinc-400 text-xs mb-1 block">搜尋股票 *</label>
             <StockSearchInput
@@ -304,7 +315,7 @@ export default function AddStockModal({ onClose, onAdd }) {
             <input
               type={dateInputType}
               value={txForm.date}
-              onChange={handleDateChange}
+              onChange={(e) => setTxForm({ ...txForm, date: e.target.value })}
               placeholder="YYYY-MM-DD，例如：2026-04-05"
               className={inputClass}
             />

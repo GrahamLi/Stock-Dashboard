@@ -7,6 +7,7 @@ import {
   fetchHoldings,
   fetchTransactions,
   fetchHistory,
+  fetchAccounts,
   addQuickHolding,
   addTransaction,
   editHolding,
@@ -26,12 +27,15 @@ import AddStockModal from "@/components/AddStockModal";
 import QuickHoldingModal from "@/components/QuickHoldingModal";
 import DailyChanges from "@/components/DailyChanges";
 import UpdateButton from "@/components/UpdateButton";
+import AccountSwitcher from "@/components/AccountSwitcher";
 
 export default function DashboardPage() {
   const [user, setUser] = useState(null);
   const [holdings, setHoldings] = useState([]);
   const [history, setHistory] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAccount, setSelectedAccount] = useState("全部帳戶");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showQuickModal, setShowQuickModal] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -50,14 +54,16 @@ export default function DashboardPage() {
 
   const fetchAll = async () => {
     try {
-      const [h, tx, hist] = await Promise.all([
+      const [h, tx, hist, accts] = await Promise.all([
         fetchHoldings(user.uid),
         fetchTransactions(user.uid),
         fetchHistory(user.uid),
+        fetchAccounts(user.uid),
       ]);
       setHoldings(h);
       setTransactions(tx);
       setHistory(hist);
+      setAccounts(accts);
       setLastUpdated(new Date());
     } catch (err) {
       console.error("讀取資料失敗：", err);
@@ -65,6 +71,35 @@ export default function DashboardPage() {
       setLoading(false);
     }
   };
+
+  const fetchAccountsOnly = async () => {
+    try {
+      const accts = await fetchAccounts(user.uid);
+      setAccounts(accts);
+    } catch (err) {
+      console.error("讀取帳戶失敗：", err);
+    }
+  };
+
+  // 依帳戶篩選資料
+  const filteredHoldings =
+    selectedAccount === "全部帳戶"
+      ? holdings
+      : holdings.filter((h) => (h.account || "預設帳戶") === selectedAccount);
+
+  const filteredTransactions =
+    selectedAccount === "全部帳戶"
+      ? transactions
+      : transactions.filter(
+          (tx) => (tx.account || "預設帳戶") === selectedAccount
+        );
+
+  const filteredHistory =
+    selectedAccount === "全部帳戶"
+      ? history
+      : history.filter(
+          (h) => (h.account || "預設帳戶") === selectedAccount
+        );
 
   const handleAddStock = async (formData) => {
     try {
@@ -100,9 +135,9 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDeleteTransaction = async (txId, code) => {
+  const handleDeleteTransaction = async (txId, code, account) => {
     try {
-      await deleteTransaction(user.uid, txId, code);
+      await deleteTransaction(user.uid, txId, code, account);
       await fetchAll();
     } catch (err) {
       console.error("刪除交易紀錄失敗：", err);
@@ -110,9 +145,9 @@ export default function DashboardPage() {
     }
   };
 
-  const handleEditTransaction = async (txId, code, updatedData) => {
+  const handleEditTransaction = async (txId, code, account, updatedData) => {
     try {
-      await editTransaction(user.uid, txId, code, updatedData);
+      await editTransaction(user.uid, txId, code, account, updatedData);
       await fetchAll();
     } catch (err) {
       console.error("編輯交易紀錄失敗：", err);
@@ -169,28 +204,37 @@ export default function DashboardPage() {
               <UpdateButton onRefresh={fetchAll} />
             </div>
 
-            <SummaryCards holdings={holdings} />
+            <SummaryCards holdings={filteredHoldings} />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 px-6 pb-4">
-              <PieChart holdings={holdings} />
-              <LineChart history={history} />
+              <PieChart holdings={filteredHoldings} />
+              <LineChart history={filteredHistory} />
             </div>
 
-            {/* 持股清單標題列 + 快速建倉按鈕 */}
-            <div className="px-6 pb-3 flex items-center justify-between">
-              <p className="text-zinc-400 text-sm">持股清單</p>
-              <button
-                onClick={() => setShowQuickModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-3 rounded-full shadow-lg transition-colors"
-              >
-                ＋ 快速建倉
-              </button>
+            {/* 持股清單標題列 + 帳戶切換器 + 快速建倉 */}
+            <div className="px-6 pb-3">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-zinc-400 text-sm">持股清單</p>
+                <button
+                  onClick={() => setShowQuickModal(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-3 rounded-full shadow-lg transition-colors"
+                >
+                  ＋ 快速建倉
+                </button>
+              </div>
+              <AccountSwitcher
+                accounts={accounts}
+                selectedAccount={selectedAccount}
+                onSelect={setSelectedAccount}
+                onAccountsChange={fetchAccountsOnly}
+                uid={user.uid}
+              />
             </div>
 
             <div className="px-6 pb-4">
               <StockTable
-                holdings={holdings}
-                transactions={transactions}
+                holdings={filteredHoldings}
+                transactions={filteredTransactions}
                 onEdit={handleEditStock}
                 onDelete={handleDeleteStock}
                 onDeleteTransaction={handleDeleteTransaction}
@@ -202,9 +246,9 @@ export default function DashboardPage() {
 
             <div className="px-6 pb-24">
               <DailyChanges
-                transactions={transactions}
-                history={history}
-                holdings={holdings}
+                transactions={filteredTransactions}
+                history={filteredHistory}
+                holdings={filteredHoldings}
               />
             </div>
           </>
@@ -223,6 +267,8 @@ export default function DashboardPage() {
           <QuickHoldingModal
             onClose={() => setShowQuickModal(false)}
             onAdd={handleAddStock}
+            accounts={accounts}
+            defaultAccount={selectedAccount !== "全部帳戶" ? selectedAccount : "預設帳戶"}
           />
         )}
 
@@ -231,6 +277,8 @@ export default function DashboardPage() {
           <AddStockModal
             onClose={() => setShowAddModal(false)}
             onAdd={handleAddStock}
+            accounts={accounts}
+            defaultAccount={selectedAccount !== "全部帳戶" ? selectedAccount : "預設帳戶"}
           />
         )}
       </div>

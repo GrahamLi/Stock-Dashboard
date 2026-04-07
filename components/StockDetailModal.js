@@ -10,6 +10,57 @@ function toHalfWidth(str) {
     .replace(/\u3000/g, " ");
 }
 
+function calcSellCostPrice(tx, allTx, holding) {
+  if (tx.action !== "賣出") return null;
+
+  const codeTx = allTx
+    .filter((t) => t.id !== tx.id)
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  let batches = [];
+
+  if (holding.has_quick_holding) {
+    const t0Shares = holding.initial_shares || 0;
+    const t0Cost = holding.t0_avg_cost || holding.avg_cost || 0;
+    if (t0Shares > 0) batches.push({ shares: t0Shares, cost: t0Cost });
+  }
+
+  for (const t of codeTx) {
+    if (new Date(t.date) > new Date(tx.date)) break;
+    if (t.action === "買入") {
+      batches.push({ shares: t.shares, cost: t.price });
+    } else if (t.action === "賣出") {
+      let rem = t.shares;
+      while (rem > 0 && batches.length > 0) {
+        if (batches[0].shares <= rem) {
+          rem -= batches[0].shares;
+          batches.shift();
+        } else {
+          batches[0].shares -= rem;
+          rem = 0;
+        }
+      }
+    }
+  }
+
+  let rem = tx.shares;
+  let totalCost = 0;
+  let tempBatches = batches.map((b) => ({ ...b }));
+
+  while (rem > 0 && tempBatches.length > 0) {
+    if (tempBatches[0].shares <= rem) {
+      totalCost += tempBatches[0].cost * tempBatches[0].shares;
+      rem -= tempBatches[0].shares;
+      tempBatches.shift();
+    } else {
+      totalCost += tempBatches[0].cost * rem;
+      rem = 0;
+    }
+  }
+
+  return tx.shares > 0 ? totalCost / tx.shares : null;
+}
+
 export default function StockDetailModal({
   holding,
   transactions,
@@ -25,20 +76,12 @@ export default function StockDetailModal({
   const [showDeleteQuick, setShowDeleteQuick] = useState(false);
   const [editingTx, setEditingTx] = useState(null);
   const [showEditQuick, setShowEditQuick] = useState(false);
-
   const [txEditForm, setTxEditForm] = useState({
-    shares: "",
-    price: "",
-    date: "",
-    note: "",
-    action: "",
+    shares: "", price: "", date: "", note: "", action: "",
   });
-
   const [quickEditForm, setQuickEditForm] = useState({
-    shares: "",
-    avg_cost: "",
+    shares: "", avg_cost: "",
   });
-
   const [editError, setEditError] = useState("");
   const [editLoading, setEditLoading] = useState(false);
   const [dateInputType, setDateInputType] = useState("date");
@@ -62,14 +105,15 @@ export default function StockDetailModal({
   };
 
   const stockTx = transactions
-    .filter((tx) => tx.code === holding.code)
+    .filter((tx) => tx.code === holding.code &&
+      (tx.account || "預設帳戶") === (holding.account || "預設帳戶"))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const hasQuickHolding = holding.has_quick_holding === true;
 
   const handleDeleteTx = async (txId) => {
     try {
-      await onDeleteTransaction(txId, holding.code);
+      await onDeleteTransaction(txId, holding.code, holding.account || "預設帳戶");
       setDeletingTxId(null);
       onClose();
     } catch (err) {
@@ -90,11 +134,8 @@ export default function StockDetailModal({
   const openEditTx = (tx) => {
     setEditingTx(tx);
     setTxEditForm({
-      shares: tx.shares,
-      price: tx.price,
-      date: tx.date,
-      note: tx.note || "",
-      action: tx.action,
+      shares: tx.shares, price: tx.price,
+      date: tx.date, note: tx.note || "", action: tx.action,
     });
     setDateInputType("date");
     setEditError("");
@@ -103,7 +144,7 @@ export default function StockDetailModal({
   const openEditQuick = () => {
     setQuickEditForm({
       shares: holding.initial_shares || holding.shares,
-      avg_cost: holding.avg_cost,
+      avg_cost: holding.t0_avg_cost || holding.avg_cost,
     });
     setShowEditQuick(true);
     setEditError("");
@@ -115,35 +156,36 @@ export default function StockDetailModal({
     const normalizedPrice = toHalfWidth(String(txEditForm.price));
 
     if (!normalizedShares || isNaN(normalizedShares) || Number(normalizedShares) <= 0) {
-      setEditError("股數請輸入正確數字。");
-      return;
+      setEditError("股數請輸入正確數字。"); return;
     }
     if (!normalizedPrice || isNaN(normalizedPrice) || Number(normalizedPrice) <= 0) {
-      setEditError("成交價請輸入正確數字。");
-      return;
+      setEditError("成交價請輸入正確數字。"); return;
     }
     if (!txEditForm.date) {
-      setEditError("請選擇交易日期。");
-      return;
+      setEditError("請選擇交易日期。"); return;
     }
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(txEditForm.date)) {
-      setEditError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05");
-      return;
+      setEditError("日期格式請輸入 YYYY-MM-DD，例如：2026-04-05"); return;
     }
     setEditLoading(true);
     try {
-      await onEditTransaction(editingTx.id, holding.code, {
-        shares: Number(normalizedShares),
-        price: Number(normalizedPrice),
-        date: txEditForm.date,
-        note: txEditForm.note,
-        action: txEditForm.action,
-      });
+      await onEditTransaction(
+        editingTx.id,
+        holding.code,
+        holding.account || "預設帳戶",
+        {
+          shares: Number(normalizedShares),
+          price: Number(normalizedPrice),
+          date: txEditForm.date,
+          note: txEditForm.note,
+          action: txEditForm.action,
+        }
+      );
       setEditingTx(null);
       onClose();
     } catch (err) {
-      setEditError("儲存失敗，請稍後再試。");
+      setEditError(err.message || "儲存失敗，請稍後再試。");
     } finally {
       setEditLoading(false);
     }
@@ -155,12 +197,10 @@ export default function StockDetailModal({
     const normalizedCost = toHalfWidth(String(quickEditForm.avg_cost));
 
     if (!normalizedShares || isNaN(normalizedShares) || Number(normalizedShares) <= 0) {
-      setEditError("股數請輸入正確數字。");
-      return;
+      setEditError("股數請輸入正確數字。"); return;
     }
     if (!normalizedCost || isNaN(normalizedCost) || Number(normalizedCost) <= 0) {
-      setEditError("平均成本請輸入正確數字。");
-      return;
+      setEditError("平均成本請輸入正確數字。"); return;
     }
     setEditLoading(true);
     try {
@@ -171,7 +211,7 @@ export default function StockDetailModal({
       setShowEditQuick(false);
       onClose();
     } catch (err) {
-      setEditError("儲存失敗，請稍後再試。");
+      setEditError(err.message || "儲存失敗，請稍後再試。");
     } finally {
       setEditLoading(false);
     }
@@ -189,11 +229,14 @@ export default function StockDetailModal({
           <div className="p-6 border-b border-zinc-800 shrink-0">
             <div className="flex items-start justify-between">
               <div>
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-1">
                   <h2 className="text-white font-bold text-xl">{holding.code}</h2>
                   <span className="text-zinc-400 text-sm">{holding.name}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400">
+                    {holding.account || "預設帳戶"}
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-4 text-sm">
+                <div className="flex flex-wrap gap-4 text-sm mt-2">
                   <span className="text-zinc-400">
                     持股：<span className="text-white">{formatShares(holding.shares)}</span>
                   </span>
@@ -230,84 +273,100 @@ export default function StockDetailModal({
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-zinc-900">
                   <tr className="border-b border-zinc-800">
-                    <th className="text-zinc-400 font-medium text-left px-5 py-3">日期</th>
-                    <th className="text-zinc-400 font-medium text-center px-5 py-3">類型</th>
-                    <th className="text-zinc-400 font-medium text-right px-5 py-3">股數</th>
-                    <th className="text-zinc-400 font-medium text-right px-5 py-3">價格</th>
-                    <th className="text-zinc-400 font-medium text-right px-5 py-3">總金額</th>
-                    <th className="text-zinc-400 font-medium text-left px-5 py-3">備註</th>
-                    <th className="text-zinc-400 font-medium text-center px-5 py-3">操作</th>
+                    <th className="text-zinc-400 font-medium text-left px-4 py-3">日期</th>
+                    <th className="text-zinc-400 font-medium text-center px-4 py-3">類型</th>
+                    <th className="text-zinc-400 font-medium text-right px-4 py-3">股數</th>
+                    <th className="text-zinc-400 font-medium text-right px-4 py-3">價格</th>
+                    <th className="text-zinc-400 font-medium text-right px-4 py-3">成本價</th>
+                    <th className="text-zinc-400 font-medium text-right px-4 py-3">總金額</th>
+                    <th className="text-zinc-400 font-medium text-left px-4 py-3">備註</th>
+                    <th className="text-zinc-400 font-medium text-center px-4 py-3">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {stockTx.map((tx) => (
-                    <tr
-                      key={tx.id}
-                      className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors"
-                    >
-                      <td className="px-5 py-3 text-zinc-300 text-xs">{tx.date}</td>
-                      <td className="px-5 py-3 text-center">
-                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                          tx.action === "買入"
-                            ? "bg-green-400/10 text-green-400"
-                            : "bg-red-400/10 text-red-400"
-                        }`}>
-                          {tx.action}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-right text-zinc-300">
-                        {formatShares(tx.shares)}
-                      </td>
-                      <td className="px-5 py-3 text-right text-zinc-300">
-                        ${formatMoney(tx.price)}
-                      </td>
-                      <td className="px-5 py-3 text-right text-zinc-300">
-                        ${formatMoney(tx.shares * tx.price)}
-                      </td>
-                      <td className="px-5 py-3 text-zinc-400 text-xs">
-                        {tx.note || "-"}
-                      </td>
-                      <td className="px-5 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => openEditTx(tx)}
-                            className="text-zinc-500 hover:text-blue-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-blue-500"
-                          >
-                            編輯
-                          </button>
-                          <button
-                            onClick={() => setDeletingTxId(tx.id)}
-                            className="text-zinc-500 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-500"
-                          >
-                            刪除
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {stockTx.map((tx) => {
+                    const costPrice = calcSellCostPrice(tx, stockTx, holding);
+                    const isProfit = costPrice !== null && tx.price >= costPrice;
+                    return (
+                      <tr
+                        key={tx.id}
+                        className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors"
+                      >
+                        <td className="px-4 py-3 text-zinc-300 text-xs">{tx.date}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                            tx.action === "買入"
+                              ? "bg-green-400/10 text-green-400"
+                              : "bg-red-400/10 text-red-400"
+                          }`}>
+                            {tx.action}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right text-zinc-300">
+                          {formatShares(tx.shares)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-zinc-300">
+                          ${formatMoney(tx.price)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs">
+                          {tx.action === "賣出" && costPrice !== null ? (
+                            <span className={isProfit ? "text-green-400" : "text-red-400"}>
+                              ${formatMoney(costPrice)}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-600">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right text-zinc-300">
+                          ${formatMoney(tx.shares * tx.price)}
+                        </td>
+                        <td className="px-4 py-3 text-zinc-400 text-xs">
+                          {tx.note || "-"}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => openEditTx(tx)}
+                              className="text-zinc-500 hover:text-blue-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-blue-500"
+                            >
+                              編輯
+                            </button>
+                            <button
+                              onClick={() => setDeletingTxId(tx.id)}
+                              className="text-zinc-500 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-500"
+                            >
+                              刪除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
 
                   {/* T0 快速建倉 */}
                   {hasQuickHolding && (
                     <tr className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800 transition-colors bg-zinc-800/30">
-                      <td className="px-5 py-3 text-zinc-500 text-xs">－</td>
-                      <td className="px-5 py-3 text-center">
+                      <td className="px-4 py-3 text-zinc-500 text-xs">－</td>
+                      <td className="px-4 py-3 text-center">
                         <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-400/10 text-blue-400">
                           建倉
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-right text-zinc-400">
+                      <td className="px-4 py-3 text-right text-zinc-400">
                         {formatShares(holding.initial_shares || holding.shares)}
                       </td>
-                      <td className="px-5 py-3 text-right text-zinc-400">
+                      <td className="px-4 py-3 text-right text-zinc-400">
                         ${formatMoney(holding.t0_avg_cost || holding.avg_cost)}
                       </td>
-                      <td className="px-5 py-3 text-right text-zinc-400">
-                        ${formatMoney((holding.initial_shares || holding.shares) * (holding.t0_avg_cost || holding.avg_cost))}
+                      <td className="px-4 py-3 text-right text-zinc-600 text-xs">-</td>
+                      <td className="px-4 py-3 text-right text-zinc-400">
+                        ${formatMoney(
+                          (holding.initial_shares || holding.shares) *
+                          (holding.t0_avg_cost || holding.avg_cost)
+                        )}
                       </td>
-                      <td className="px-5 py-3 text-zinc-500 text-xs">
-                        快速建倉
-                      </td>
-                      <td className="px-5 py-3 text-center">
+                      <td className="px-4 py-3 text-zinc-500 text-xs">快速建倉</td>
+                      <td className="px-4 py-3 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <button
                             onClick={openEditQuick}
@@ -384,13 +443,11 @@ export default function StockDetailModal({
                   type={dateInputType}
                   value={txEditForm.date}
                   onChange={(e) => setTxEditForm({ ...txEditForm, date: e.target.value })}
-                  placeholder="YYYY-MM-DD，例如：2026-04-05"
+                  placeholder="YYYY-MM-DD"
                   className={inputClass}
                 />
                 {dateInputType === "text" && (
-                  <p className="text-zinc-600 text-xs mt-1">
-                    格式：YYYY-MM-DD，例如：2026-04-05
-                  </p>
+                  <p className="text-zinc-600 text-xs mt-1">格式：YYYY-MM-DD，例如：2026-04-05</p>
                 )}
               </div>
               <div>

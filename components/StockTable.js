@@ -45,6 +45,7 @@ export default function StockTable({
           <thead>
             <tr className="border-b border-zinc-800">
               <th className="text-zinc-400 font-medium text-left px-5 py-3">股票</th>
+              <th className="text-zinc-400 font-medium text-left px-5 py-3">帳戶</th>
               <th className="text-zinc-400 font-medium text-right px-5 py-3">持股數</th>
               <th className="text-zinc-400 font-medium text-right px-5 py-3">平均成本</th>
               <th className="text-zinc-400 font-medium text-right px-5 py-3">現價</th>
@@ -71,6 +72,11 @@ export default function StockTable({
                   <td className="px-5 py-3">
                     <p className="text-white font-medium">{h.code}</p>
                     <p className="text-zinc-400 text-xs">{h.name}</p>
+                  </td>
+                  <td className="px-5 py-3">
+                    <span className="text-xs px-2 py-1 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300">
+                      {h.account || "預設帳戶"}
+                    </span>
                   </td>
                   <td className="px-5 py-3 text-right text-zinc-300">
                     {formatShares(h.shares)}
